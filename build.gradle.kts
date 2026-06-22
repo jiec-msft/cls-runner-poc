@@ -17,12 +17,14 @@ val fatUntilBuild = providers.gradleProperty("untilBuild").get()           // 26
 val nativeSinceBuild = providers.gradleProperty("nativeSinceBuild").get()  // 261
 val universalSinceBuild = providers.gradleProperty("universalSinceBuild").get() // 251.25410 (2025.1.1)
 
-// universalBuild=true builds a single legacy-style plugin (e.g. 1.12.0) that supports 2025.1.1+ ALL
-// IDEs (since universalSinceBuild, NO until-build) — the "old plugin" a user has before the split.
-// Otherwise we build the split fat (e.g. 1.13.0-251); NativePluginPatcher then repacks it into slims.
+// universalBuild=true builds a single legacy-style plugin (e.g. 1.12.1-251) that supports 2025.1.1+
+// ALL IDEs (since universalSinceBuild, NO until-build) — the "old plugin" a user has before the split.
+// Otherwise we build the split fat (e.g. 1.13.1-251); NativePluginPatcher then repacks it into slims.
 val universalBuild = providers.gradleProperty("universalBuild").map { it.toBoolean() }.getOrElse(false)
-val fatVersion = "$pocBaseVersion-$fatSinceBuild"                          // e.g. 1.13.0-251
-val pluginVersion = if (universalBuild) pocBaseVersion else fatVersion     // 1.12.0 | 1.13.0-251
+// Both the universal and the split-fat carry the -251 suffix (cosmetic, = since-build branch); the
+// universal still differs by its since-build (251.25410) and having no until-build (see ideaVersion).
+val pluginVersion = "$pocBaseVersion-$fatSinceBuild"                        // e.g. 1.12.1-251 / 1.13.1-251
+val fatVersion = pluginVersion
 
 version = pluginVersion
 

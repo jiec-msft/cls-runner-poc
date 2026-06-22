@@ -30,15 +30,36 @@ $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $pluginId = "com.jiec.cls.runner"
 $pluginName = "CLS Runner"
-$universalSinceBuild = "251.25410"   # 2025.1.1 — keep in sync with gradle.properties
 
 $BaseUrl = $BaseUrl.TrimEnd("/")
 $outPath = Join-Path $projectRoot $OutDir
 New-Item -ItemType Directory -Force -Path $outPath | Out-Null
 
-# Maps for the trailing platform suffix on slim ZIPs.
-$osModule = @{ windows = "windows"; macos = "mac"; linux = "linux" }
-$archModule = @{ x64 = "x86_64"; arm64 = "arm64" }
+Add-Type -AssemblyName System.IO.Compression.FileSystem | Out-Null
+
+# Reads META-INF/plugin.xml from the plugin jar inside a distribution zip. We classify each zip by
+# its REAL <idea-version>/<depends> (not the file name), so the universal (1.12.x-251) and the fat
+# (1.13.x-251) — which share the -251 suffix but differ in since/until — are emitted correctly, and
+# the since/until values can never drift from what was actually built.
+function Get-PluginXml([string]$zipPath) {
+    $zip = [System.IO.Compression.ZipFile]::OpenRead($zipPath)
+    try {
+        foreach ($je in ($zip.Entries | Where-Object { $_.FullName -match 'lib/.*\.jar$' })) {
+            $ms = New-Object System.IO.MemoryStream
+            $s = $je.Open(); $s.CopyTo($ms); $s.Close(); $ms.Position = 0
+            $jar = New-Object System.IO.Compression.ZipArchive($ms, [System.IO.Compression.ZipArchiveMode]::Read)
+            try {
+                $px = $jar.Entries | Where-Object { $_.FullName -eq 'META-INF/plugin.xml' } | Select-Object -First 1
+                if ($px) {
+                    $r = New-Object System.IO.StreamReader($px.Open())
+                    $xml = $r.ReadToEnd(); $r.Close()
+                    return $xml
+                }
+            } finally { $jar.Dispose(); $ms.Dispose() }
+        }
+    } finally { $zip.Dispose() }
+    return $null
+}
 
 function Get-Zips {
     $fat = Get-ChildItem -Path (Join-Path $projectRoot "build\distributions") -Filter "cls-runner-*.zip" -ErrorAction SilentlyContinue
@@ -60,27 +81,23 @@ $sb = [System.Text.StringBuilder]::new()
 
 foreach ($zip in $zips) {
     Copy-Item $zip.FullName (Join-Path $outPath $zip.Name) -Force
-    # version = file name minus 'cls-runner-' prefix and '.zip'
-    $version = $zip.BaseName -replace '^cls-runner-', ''
     $url = "$BaseUrl/$($zip.Name)"
+
+    $xml = Get-PluginXml $zip.FullName
+    if (-not $xml) { throw "No plugin.xml found in $($zip.Name)" }
+    if ($xml -notmatch '<version>([^<]+)</version>') { throw "No <version> in $($zip.Name) plugin.xml" }
+    $version = $Matches[1]
+    if ($xml -notmatch '(<idea-version[^>]*/>)') { throw "No <idea-version/> in $($zip.Name) plugin.xml" }
+    $ideaVersion = $Matches[1].Trim()
 
     [void]$sb.AppendLine("  <plugin id=`"$(Esc $pluginId)`" url=`"$(Esc $url)`" version=`"$(Esc $version)`">")
     [void]$sb.AppendLine("    <name>$(Esc $pluginName)</name>")
-
-    # Classify by the trailing suffix (robust for stable, nightly, universal):
-    #   ...-261-{os}-{arch} -> slim     ...-251 -> fat     anything else -> universal (e.g. 1.12.0)
-    if ($version -match '-261-(windows|macos|linux)-(x64|arm64)$') {
-        [void]$sb.AppendLine('    <idea-version since-build="261"/>')
-        [void]$sb.AppendLine("    <depends>com.intellij.modules.os.$($osModule[$Matches[1]])</depends>")
-        [void]$sb.AppendLine("    <depends>com.intellij.modules.arch.$($archModule[$Matches[2]])</depends>")
-    } elseif ($version -match '-251$') {
-        [void]$sb.AppendLine('    <idea-version since-build="251" until-build="260.*"/>')
-    } else {
-        # universal (legacy) build: 2025.1.1+ with no upper bound
-        [void]$sb.AppendLine("    <idea-version since-build=`"$universalSinceBuild`"/>")
+    [void]$sb.AppendLine("    $ideaVersion")
+    foreach ($m in [regex]::Matches($xml, '<depends>(com\.intellij\.modules\.(?:os|arch)\.[^<]+)</depends>')) {
+        [void]$sb.AppendLine("    <depends>$($m.Groups[1].Value)</depends>")
     }
     [void]$sb.AppendLine('  </plugin>')
-    Write-Host "staged $($zip.Name)  (version=$version)"
+    Write-Host "staged $($zip.Name)  (version=$version, $ideaVersion)"
 }
 
 [void]$sb.AppendLine('</plugins>')
