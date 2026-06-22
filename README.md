@@ -43,15 +43,21 @@ Migration story: a user on `1.12.0` is offered `1.13.0-251` (fat) on a `< 261` I
 # 1. Fetch the real CLS binaries for all 6 platforms (~590 MB, not committed)
 pwsh scripts/download-binaries.ps1
 
-# 2a. Universal (legacy) 1.12.0 — single ZIP, 2025.1.1+, no cap
-#     -> build/distributions/cls-runner-1.12.0.zip
-./gradlew buildPlugin -PuniversalBuild=true -PpocBaseVersion=1.12.0
+# 2a. Universal (legacy) 1.12.1 — single ZIP, 2025.1.1+, no cap
+#     -> build/distributions/cls-runner-1.12.1.zip
+./gradlew buildPlugin -PuniversalBuild=true -PpocBaseVersion=1.12.1
 
-# 2b. Split 1.13.0 — fat ZIP + 6 slim ZIPs
-#     -> build/distributions/cls-runner-1.13.0-251.zip
-#     -> build/native-distributions/cls-runner-1.13.0-261-{os}-{arch}.zip
-./gradlew buildNativePlugins -PpocBaseVersion=1.13.0
+# 2b. Split 1.13.1 — fat ZIP + 6 slim ZIPs
+#     -> build/distributions/cls-runner-1.13.1-251.zip
+#     -> build/native-distributions/cls-runner-1.13.1-261-{os}-{arch}.zip
+./gradlew buildNativePlugins -PpocBaseVersion=1.13.1
 ```
+
+> **Marketplace-verifier clean (1.12.1 / 1.13.1):** the binary path is resolved from the plugin
+> jar's own code source (pure JDK) and arch from `CpuArch`, so the plugin uses no
+> `@ApiStatus.Internal` (`PluginManagerCore.getPlugin`) or scheduled-for-removal
+> (`SystemInfo.isAarch64`) API — both flagged by the verifier on 2026.2+ because the universal build
+> has no until-build cap.
 
 ## Publish
 

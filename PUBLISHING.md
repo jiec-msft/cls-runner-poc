@@ -22,22 +22,27 @@ bump `pocBaseVersion` to `1.13.1` (fat becomes `1.13.1-251`), rebuild + re-stage
 
 Max plugin size is **400 MB**; the fat is ~362 MB, so **both fat and slims fit**.
 
+> The verifier checks the no-until-build universal plugin against future EAPs (2026.2+). `1.12.1` /
+> `1.13.1` are the first verifier-clean versions: binary path comes from the plugin jar's own code
+> source (pure JDK) and arch from `CpuArch`, so no internal/scheduled-for-removal API is used. Use
+> these (not `1.12.0` / `1.13.0`).
+
 **Recommended sequence (exercises the real-world fat→slim migration):**
 
-0. **Build + upload the universal `1.12.0` first** (the "old plugin" users already have):
+0. **Build + upload the universal `1.12.1` first** (the "old plugin" users already have):
    ```powershell
-   ./gradlew buildPlugin -PuniversalBuild=true -PpocBaseVersion=1.12.0
+   ./gradlew buildPlugin -PuniversalBuild=true -PpocBaseVersion=1.12.1
    ```
-   Upload `build/distributions/cls-runner-1.12.0.zip` via the web UI
+   Upload `build/distributions/cls-runner-1.12.1.zip` via the web UI
    (https://plugins.jetbrains.com/plugin/add). This creates plugin id `com.jiec.cls.runner` (since
-   it is a brand-new plugin) and starts moderation. `1.12.0` is 2025.1.1+ with no cap, so it installs
+   it is a brand-new plugin) and starts moderation. `1.12.1` is 2025.1.1+ with no cap, so it installs
    on every IDE. To stay semi-private (like jb nightly), use a non-default **channel** and/or
    **isHidden**.
-1. **Then build + upload the split `1.13.0`** (fat + 6 slims):
+1. **Then build + upload the split `1.13.1`** (fat + 6 slims):
    ```powershell
-   ./gradlew buildNativePlugins -PpocBaseVersion=1.13.0
+   ./gradlew buildNativePlugins -PpocBaseVersion=1.13.1
    ```
-   Now a `1.12.0` user is offered `1.13.0-251` on `< 261` IDEs, or the matching slim on `>= 261`.
+   Now a `1.12.1` user is offered `1.13.1-251` on `< 261` IDEs, or the matching slim on `>= 261`.
 2. **Get a token** — https://plugins.jetbrains.com/author/me/tokens (a `perm:...` token).
 3. **Upload (script or CI)**:
    ```powershell
