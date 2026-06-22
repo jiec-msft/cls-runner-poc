@@ -29,22 +29,16 @@ param(
 $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $pluginId = "com.jiec.cls.runner"
-$pluginName = "CLS Runner (POC)"
+$pluginName = "CLS Runner"
+$universalSinceBuild = "251.25410"   # 2025.1.1 — keep in sync with gradle.properties
 
 $BaseUrl = $BaseUrl.TrimEnd("/")
 $outPath = Join-Path $projectRoot $OutDir
 New-Item -ItemType Directory -Force -Path $outPath | Out-Null
 
-# Compatibility matrix keyed by the version suffix parsed from each ZIP file name.
-# osModule/archModule are the platform-fixed module names; the suffix is cosmetic.
-$slimMatrix = @{
-    "261-windows-x64"   = @{ os = "windows"; arch = "x86_64" }
-    "261-windows-arm64" = @{ os = "windows"; arch = "arm64" }
-    "261-macos-x64"     = @{ os = "mac";     arch = "x86_64" }
-    "261-macos-arm64"   = @{ os = "mac";     arch = "arm64" }
-    "261-linux-x64"     = @{ os = "linux";   arch = "x86_64" }
-    "261-linux-arm64"   = @{ os = "linux";   arch = "arm64" }
-}
+# Maps for the trailing platform suffix on slim ZIPs.
+$osModule = @{ windows = "windows"; macos = "mac"; linux = "linux" }
+$archModule = @{ x64 = "x86_64"; arm64 = "arm64" }
 
 function Get-Zips {
     $fat = Get-ChildItem -Path (Join-Path $projectRoot "build\distributions") -Filter "cls-runner-*.zip" -ErrorAction SilentlyContinue
@@ -73,15 +67,17 @@ foreach ($zip in $zips) {
     [void]$sb.AppendLine("  <plugin id=`"$(Esc $pluginId)`" url=`"$(Esc $url)`" version=`"$(Esc $version)`">")
     [void]$sb.AppendLine("    <name>$(Esc $pluginName)</name>")
 
-    $suffix = $version -replace '^\d+\.\d+\.\d+-', ''   # e.g. '251' or '261-windows-x64'
-    if ($slimMatrix.ContainsKey($suffix)) {
-        $m = $slimMatrix[$suffix]
+    # Classify by the trailing suffix (robust for stable, nightly, universal):
+    #   ...-261-{os}-{arch} -> slim     ...-251 -> fat     anything else -> universal (e.g. 1.12.0)
+    if ($version -match '-261-(windows|macos|linux)-(x64|arm64)$') {
         [void]$sb.AppendLine('    <idea-version since-build="261"/>')
-        [void]$sb.AppendLine("    <depends>com.intellij.modules.os.$($m.os)</depends>")
-        [void]$sb.AppendLine("    <depends>com.intellij.modules.arch.$($m.arch)</depends>")
-    } else {
-        # fat
+        [void]$sb.AppendLine("    <depends>com.intellij.modules.os.$($osModule[$Matches[1]])</depends>")
+        [void]$sb.AppendLine("    <depends>com.intellij.modules.arch.$($archModule[$Matches[2]])</depends>")
+    } elseif ($version -match '-251$') {
         [void]$sb.AppendLine('    <idea-version since-build="251" until-build="260.*"/>')
+    } else {
+        # universal (legacy) build: 2025.1.1+ with no upper bound
+        [void]$sb.AppendLine("    <idea-version since-build=`"$universalSinceBuild`"/>")
     }
     [void]$sb.AppendLine('  </plugin>')
     Write-Host "staged $($zip.Name)  (version=$version)"

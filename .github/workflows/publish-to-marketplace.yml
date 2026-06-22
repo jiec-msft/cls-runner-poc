@@ -38,6 +38,14 @@ on:
         type: string
         required: true
         default: '1.13.0'
+      build_mode:
+        description: 'split = fat 1.13.0-251 + 6 slims (2026.1 routing). universal = single legacy plugin (e.g. 1.12.0, 2025.1.1+ all IDEs, no cap).'
+        type: choice
+        required: true
+        default: split
+        options:
+          - split
+          - universal
       plugin_id:
         description: 'Numeric Marketplace plugin id (recommended once known; else xmlId is used)'
         type: string
@@ -77,6 +85,7 @@ jobs:
         env:
           RELEASE_VERSION: ${{ inputs.release_version }}
           CHANNEL: ${{ inputs.channel }}
+          BUILD_MODE: ${{ inputs.build_mode }}
           RUN_NUMBER: ${{ github.run_number }}
         run: |
           set -euo pipefail
@@ -91,19 +100,28 @@ jobs:
             CORE="$RELEASE_VERSION"
           fi
           echo "core=$CORE" >> "$GITHUB_OUTPUT"
-          echo "Core version: $CORE  ->  fat ${CORE}-251 / slims ${CORE}-261-{os}-{arch}"
+          if [ "$BUILD_MODE" = "universal" ]; then
+            echo "Core version: $CORE  ->  universal ${CORE} (2025.1.1+, no cap)"
+          else
+            echo "Core version: $CORE  ->  fat ${CORE}-251 / slims ${CORE}-261-{os}-{arch}"
+          fi
 
       - name: Download CLS binaries (all 6 platforms)
         shell: pwsh
         run: ./scripts/download-binaries.ps1
 
-      - name: Build fat + 6 slim ZIPs
+      - name: Build plugin ZIP(s)
         shell: bash
         env:
           CORE: ${{ steps.ver.outputs.core }}
+          BUILD_MODE: ${{ inputs.build_mode }}
         run: |
           chmod +x ./gradlew
-          ./gradlew buildNativePlugins -PpocBaseVersion="$CORE" --no-daemon --console=plain
+          if [ "$BUILD_MODE" = "universal" ]; then
+            ./gradlew buildPlugin -PuniversalBuild=true -PpocBaseVersion="$CORE" --no-daemon --console=plain
+          else
+            ./gradlew buildNativePlugins -PpocBaseVersion="$CORE" --no-daemon --console=plain
+          fi
 
       - name: List built ZIPs
         shell: bash

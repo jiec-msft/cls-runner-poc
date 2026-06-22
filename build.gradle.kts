@@ -15,10 +15,16 @@ val pocBaseVersion = providers.gradleProperty("pocBaseVersion").get()      // 1.
 val fatSinceBuild = providers.gradleProperty("sinceBuild").get()           // 251
 val fatUntilBuild = providers.gradleProperty("untilBuild").get()           // 260.*
 val nativeSinceBuild = providers.gradleProperty("nativeSinceBuild").get()  // 261
-// fat carries the -251 suffix; slims get -261-{os}-{arch} via NativePluginPatcher.
-val fatVersion = "$pocBaseVersion-$fatSinceBuild"                          // e.g. 1.13.0-251
+val universalSinceBuild = providers.gradleProperty("universalSinceBuild").get() // 251.25410 (2025.1.1)
 
-version = fatVersion
+// universalBuild=true builds a single legacy-style plugin (e.g. 1.12.0) that supports 2025.1.1+ ALL
+// IDEs (since universalSinceBuild, NO until-build) — the "old plugin" a user has before the split.
+// Otherwise we build the split fat (e.g. 1.13.0-251); NativePluginPatcher then repacks it into slims.
+val universalBuild = providers.gradleProperty("universalBuild").map { it.toBoolean() }.getOrElse(false)
+val fatVersion = "$pocBaseVersion-$fatSinceBuild"                          // e.g. 1.13.0-251
+val pluginVersion = if (universalBuild) pocBaseVersion else fatVersion     // 1.12.0 | 1.13.0-251
+
+version = pluginVersion
 
 repositories {
     mavenCentral()
@@ -40,11 +46,18 @@ intellijPlatform {
 
     pluginConfiguration {
         id = "com.jiec.cls.runner"
-        name = "CLS Runner (POC)"
-        version = fatVersion
+        name = "CLS Runner"
+        version = pluginVersion
         ideaVersion {
-            sinceBuild = fatSinceBuild
-            untilBuild = fatUntilBuild
+            if (universalBuild) {
+                // Legacy universal build: 2025.1.1+ with NO upper bound, installable on every IDE
+                // (incl. 261+), so it is the migration source the split 1.13.0 updates from.
+                sinceBuild = universalSinceBuild
+                untilBuild = provider { null }
+            } else {
+                sinceBuild = fatSinceBuild
+                untilBuild = fatUntilBuild
+            }
         }
     }
     publishing {

@@ -1,6 +1,6 @@
 <idea-plugin require-restart="true">
     <id>com.jiec.cls.runner</id>
-    <name>CLS Runner (POC)</name>
+    <name>CLS Runner</name>
     <vendor url="https://github.com/jiec-msft">jiec-msft</vendor>
 
     <!-- version and idea-version are overwritten by IPGP's patchPluginXml (see build.gradle.kts). -->
@@ -8,9 +8,9 @@
     <idea-version since-build="251" until-build="260.*"/>
 
     <description><![CDATA[
-        Minimal POC plugin that launches the bundled copilot-language-server binary with
-        <code>--stdio</code> from its absolute path. Used to validate fat/slim split-plugin
-        distribution, JetBrains Marketplace OS/arch routing, and auto-update/migration.
+        Launches the bundled copilot-language-server binary with <code>--stdio</code> from its
+        absolute path. Used to validate fat/slim split-plugin distribution, JetBrains Marketplace
+        OS/arch routing, and auto-update/migration.
     ]]></description>
 
     <depends>com.intellij.modules.platform</depends>
@@ -25,6 +25,12 @@
                 text="Launch CLS (--stdio)"
                 description="Launch the bundled copilot-language-server with --stdio">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
+        </action>
+        <action id="com.jiec.cls.runner.StopClsAction"
+                class="com.jiec.cls.runner.StopClsAction"
+                text="Stop CLS"
+                description="Stop the copilot-language-server started by this plugin">
+            <add-to-group group-id="ToolsMenu" anchor="after" relative-to-action="com.jiec.cls.runner.LaunchClsAction"/>
         </action>
     </actions>
 </idea-plugin>

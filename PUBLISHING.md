@@ -13,7 +13,7 @@ pwsh scripts/serve-repo.ps1               # serve http://localhost:8181
 ```
 
 In the IDE: **Settings → Plugins → ⚙ → Manage Plugin Repositories → `http://localhost:8181/updatePlugins.xml`**,
-then install "CLS Runner (POC)" from the Marketplace tab.
+then install "CLS Runner" from the Marketplace tab.
 
 Auto-update experiment: serve only the fat (`make-updatePlugins.ps1 -OnlyFat`), install on 2025.1,
 bump `pocBaseVersion` to `1.13.1` (fat becomes `1.13.1-251`), rebuild + re-stage, then **Check for Updates**.
@@ -22,12 +22,24 @@ bump `pocBaseVersion` to `1.13.1` (fat becomes `1.13.1-251`), rebuild + re-stage
 
 Max plugin size is **400 MB**; the fat is ~362 MB, so **both fat and slims fit**.
 
-1. **Create the listing (once, web UI)** — https://plugins.jetbrains.com/plugin/add → upload the fat
-   `cls-runner-1.13.0-251.zip`. This creates plugin id `com.jiec.cls.runner` and starts moderation.
-   To stay semi-private (like jb nightly), publish to a non-default **channel** and/or use
-   **isHidden**; users install by adding the channel repo URL.
+**Recommended sequence (exercises the real-world fat→slim migration):**
+
+0. **Build + upload the universal `1.12.0` first** (the "old plugin" users already have):
+   ```powershell
+   ./gradlew buildPlugin -PuniversalBuild=true -PpocBaseVersion=1.12.0
+   ```
+   Upload `build/distributions/cls-runner-1.12.0.zip` via the web UI
+   (https://plugins.jetbrains.com/plugin/add). This creates plugin id `com.jiec.cls.runner` (since
+   it is a brand-new plugin) and starts moderation. `1.12.0` is 2025.1.1+ with no cap, so it installs
+   on every IDE. To stay semi-private (like jb nightly), use a non-default **channel** and/or
+   **isHidden**.
+1. **Then build + upload the split `1.13.0`** (fat + 6 slims):
+   ```powershell
+   ./gradlew buildNativePlugins -PpocBaseVersion=1.13.0
+   ```
+   Now a `1.12.0` user is offered `1.13.0-251` on `< 261` IDEs, or the matching slim on `>= 261`.
 2. **Get a token** — https://plugins.jetbrains.com/author/me/tokens (a `perm:...` token).
-3. **Upload the rest (script)**:
+3. **Upload (script or CI)**:
    ```powershell
    pwsh scripts/publish-marketplace.ps1 -Token perm:xxxx               # all built zips
    pwsh scripts/publish-marketplace.ps1 -Token perm:xxxx -Channel nightly -Hidden
@@ -53,7 +65,9 @@ curl to `/plugin/uploadPlugin` with `-F channel` + `isHidden` + retry
 `JETBRAINS_MARKETPLACE_TOKEN`.
 
 Inputs: `channel` (stable | nightly), `visibility` (hidden | visible), `release_version` (core),
-`plugin_id` (numeric, optional — recommended once known).
+`build_mode` (split | universal), `plugin_id` (numeric, optional — recommended once known),
+`dry_run` (build only, skip upload). `build_mode=universal` builds the single `1.12.0`-style legacy
+ZIP (`buildPlugin -PuniversalBuild=true`); `split` builds the fat + 6 slims (`buildNativePlugins`).
 
 ### SemVer: how nightly stays above stable (the jb trick)
 
@@ -71,8 +85,8 @@ core (`1.13.1-nightly.<run>`) sorts **above** the latest stable (`1.13.0`). With
 users would never be offered the update. `<run>` (`github.run_number`) keeps successive nightlies
 monotonically increasing. This mirrors jb `release.yml`.
 
-> First run for a brand-new plugin: do the one-time web-UI upload (§B.1) first so the plugin exists,
-> then set `plugin_id` and run the workflow for every subsequent version.
+> First run for a brand-new plugin: do the one-time web-UI upload (§B.0, the universal `1.12.0`)
+> first so the plugin exists, then set `plugin_id` and run the workflow for every subsequent version.
 
 ## Experiments to record (findings)
 
