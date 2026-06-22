@@ -79,6 +79,17 @@ runs:
               echo "    ✅ version already exists - treating as success"; return 0
             fi
             echo "    response: $body"
+            # os/arch-constrained slims are restricted to JetBrains-authored plugins (Marketplace
+            # policy, HTTP 400). Expected for this POC's slims -> SKIP (not a failure), and DON'T
+            # retry: the policy is permanent. Publish slims via a custom plugin repo instead.
+            if echo "$body" | grep -qi "JetBrains-authored"; then
+              echo "    ⏭️  SKIP: os/arch-constrained plugin not allowed for non-JetBrains vendors on Marketplace"
+              return 2
+            fi
+            # Any other 4xx is a permanent client error; retrying won't help.
+            if [ "$code" -ge 400 ] && [ "$code" -lt 500 ]; then
+              echo "    ❌ non-retryable client error (HTTP $code)"; return 1
+            fi
             if [ "$attempt" -lt "$MAX_RETRIES" ]; then echo "    ⏳ retry in 30s..."; sleep 30; fi
           done
           echo "  ❌ failed: $(basename "$file")"
@@ -86,6 +97,14 @@ runs:
         }
 
         FAIL=0
-        for z in "${ZIPS[@]}"; do publish_one "$z" || FAIL=1; done
+        SKIP=0
+        for z in "${ZIPS[@]}"; do
+          publish_one "$z"
+          rc=$?
+          if [ "$rc" -eq 1 ]; then FAIL=1; elif [ "$rc" -eq 2 ]; then SKIP=$((SKIP + 1)); fi
+        done
+        if [ "$SKIP" -gt 0 ]; then
+          echo "⏭️  $SKIP artifact(s) skipped: os/arch-constrained plugins are Marketplace-restricted to JetBrains-authored vendors. Use a custom plugin repo for slims."
+        fi
         if [ "$FAIL" -ne 0 ]; then echo "❌ One or more uploads failed"; exit 1; fi
-        echo "✅ All ${#ZIPS[@]} ZIP(s) published to '$CHANNEL'"
+        echo "✅ Done: published $(( ${#ZIPS[@]} - SKIP )), skipped $SKIP, to channel '$CHANNEL'"
