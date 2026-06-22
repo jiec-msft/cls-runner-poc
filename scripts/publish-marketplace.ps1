@@ -12,11 +12,13 @@
 
 .PARAMETER Token       perm:... token from https://plugins.jetbrains.com/author/me/tokens
 .PARAMETER Channel     release channel; "" = Stable, e.g. "nightly" to mirror jb and stay semi-private
+.PARAMETER PluginId    numeric Marketplace plugin id (preferred over xmlId); default 32412 (cls-runner)
 .PARAMETER Hidden      set isHidden=true (approved but not publicly released)
 .PARAMETER Zips        explicit ZIP list; default = the fat + all 6 slims under build/
 #>
 param(
     [Parameter(Mandatory = $true)][string]$Token,
+    [string]$PluginId = "32412",
     [string]$XmlId = "com.jiec.cls.runner",
     [string]$Channel = "",
     [switch]$Hidden,
@@ -41,9 +43,9 @@ foreach ($zip in $Zips) {
     $args = @(
         "-s", "-S", "-i",
         "--header", "Authorization: Bearer $Token",
-        "-F", "xmlId=$XmlId",
         "-F", "file=@$zip"
     )
+    if ($PluginId) { $args += @("-F", "pluginId=$PluginId") } else { $args += @("-F", "xmlId=$XmlId") }
     if ($Channel) { $args += @("-F", "channel=$Channel") }
     if ($Hidden) { $args += @("-F", "isHidden=true") }
     $args += "https://plugins.jetbrains.com/api/updates/upload"

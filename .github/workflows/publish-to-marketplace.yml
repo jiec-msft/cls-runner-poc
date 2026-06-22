@@ -47,10 +47,10 @@ on:
           - split
           - universal
       plugin_id:
-        description: 'Numeric Marketplace plugin id (recommended once known; else xmlId is used)'
+        description: 'Numeric Marketplace plugin id (preferred; defaults to the cls-runner listing)'
         type: string
         required: false
-        default: ''
+        default: '32412'
       dry_run:
         description: 'Build only — skip the Marketplace upload (validate the pipeline safely)'
         type: boolean
