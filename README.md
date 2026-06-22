@@ -53,8 +53,9 @@ pwsh scripts/download-binaries.ps1
 ./gradlew buildNativePlugins -PpocBaseVersion=1.13.1
 ```
 
-> **Marketplace-verifier clean (1.12.1 / 1.13.1):** the binary path is resolved from the plugin
-> jar's own code source (pure JDK) and arch from `CpuArch`, so the plugin uses no
+> **Marketplace-verifier clean (1.12.1 / 1.13.1):** the binary path is resolved from this plugin's
+> own `PluginAwareClassLoader.getPluginDescriptor().getPluginPath()` (mirroring jb
+> `CopilotPlugin.getPluginBasePath()`) and arch from `CpuArch.isArm64()`, so the plugin uses no
 > `@ApiStatus.Internal` (`PluginManagerCore.getPlugin`) or scheduled-for-removal
 > (`SystemInfo.isAarch64`) API — both flagged by the verifier on 2026.2+ because the universal build
 > has no until-build cap.

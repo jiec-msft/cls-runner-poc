@@ -23,9 +23,9 @@ bump `pocBaseVersion` to `1.13.1` (fat becomes `1.13.1-251`), rebuild + re-stage
 Max plugin size is **400 MB**; the fat is ~362 MB, so **both fat and slims fit**.
 
 > The verifier checks the no-until-build universal plugin against future EAPs (2026.2+). `1.12.1` /
-> `1.13.1` are the first verifier-clean versions: binary path comes from the plugin jar's own code
-> source (pure JDK) and arch from `CpuArch`, so no internal/scheduled-for-removal API is used. Use
-> these (not `1.12.0` / `1.13.0`).
+> `1.13.1` are the first verifier-clean versions: the binary path comes from this plugin's own
+> `PluginAwareClassLoader` (jb's `CopilotPlugin.getPluginBasePath()` pattern) and arch from
+> `CpuArch`, so no internal/scheduled-for-removal API is used. Use these (not `1.12.0` / `1.13.0`).
 
 **Recommended sequence (exercises the real-world fat→slim migration):**
 
