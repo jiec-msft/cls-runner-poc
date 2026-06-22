@@ -99,8 +99,10 @@ runs:
         FAIL=0
         SKIP=0
         for z in "${ZIPS[@]}"; do
-          publish_one "$z"
-          rc=$?
+          # -e-safe: GitHub runs this step with `bash -e`, so capture the return code via `|| rc=$?`
+          # (a bare `publish_one; rc=$?` would abort the whole step on the first skip/failure).
+          rc=0
+          publish_one "$z" || rc=$?
           if [ "$rc" -eq 1 ]; then FAIL=1; elif [ "$rc" -eq 2 ]; then SKIP=$((SKIP + 1)); fi
         done
         if [ "$SKIP" -gt 0 ]; then
