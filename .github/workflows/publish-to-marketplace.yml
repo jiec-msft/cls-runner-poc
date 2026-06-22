@@ -1,0 +1,124 @@
+---
+name: Publish to Marketplace
+
+# Mirrors the jb (microsoft/copilot-intellij) publish flow:
+#  - workflow_dispatch with a channel (stable | nightly) + visibility (hidden | visible);
+#  - nightly bumps the patch and appends -nightly.<run_number> so it sorts ABOVE the latest
+#    stable in JetBrains' version comparison (see jb release.yml). Otherwise a -nightly
+#    pre-release of the SAME version would sort below stable and nightly users would never
+#    be offered the update;
+#  - build (fat + 6 slims) is decoupled from upload; upload is curl -> /plugin/uploadPlugin
+#    with -F channel + isHidden + retry (.github/actions/publish-to-marketplace).
+#
+# NOTE: the FIRST upload of a brand-new plugin must be done once via the web UI
+# (https://plugins.jetbrains.com/plugin/add) to create the listing. After that, set the
+# numeric `plugin_id` input (or rely on xmlId) and this workflow handles every version.
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: 'JetBrains Marketplace channel'
+        type: choice
+        required: true
+        default: nightly
+        options:
+          - nightly
+          - stable
+      visibility:
+        description: 'Publish as hidden or visible'
+        type: choice
+        required: true
+        default: hidden
+        options:
+          - hidden
+          - visible
+      release_version:
+        description: 'Core version. stable uses it as-is; nightly bumps patch + appends -nightly.<run>'
+        type: string
+        required: true
+        default: '1.13.0'
+      plugin_id:
+        description: 'Numeric Marketplace plugin id (recommended once known; else xmlId is used)'
+        type: string
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-publish:
+    name: Build fat + slims and publish (${{ inputs.channel }})
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Node (for npm pack of CLS binaries)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Compute version
+        id: ver
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ inputs.release_version }}
+          CHANNEL: ${{ inputs.channel }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          if [ "$CHANNEL" = "nightly" ]; then
+            MAJOR=$(echo "$RELEASE_VERSION" | cut -d. -f1)
+            MINOR=$(echo "$RELEASE_VERSION" | cut -d. -f2)
+            PATCH=$(echo "$RELEASE_VERSION" | cut -d. -f3 | cut -d- -f1)
+            NEXT=$((PATCH + 1))
+            # e.g. stable 1.13.0 -> nightly core 1.13.1-nightly.<run>  (> 1.13.0)
+            CORE="${MAJOR}.${MINOR}.${NEXT}-nightly.${RUN_NUMBER}"
+          else
+            CORE="$RELEASE_VERSION"
+          fi
+          echo "core=$CORE" >> "$GITHUB_OUTPUT"
+          echo "Core version: $CORE  ->  fat ${CORE}-251 / slims ${CORE}-261-{os}-{arch}"
+
+      - name: Download CLS binaries (all 6 platforms)
+        shell: pwsh
+        run: ./scripts/download-binaries.ps1
+
+      - name: Build fat + 6 slim ZIPs
+        shell: bash
+        env:
+          CORE: ${{ steps.ver.outputs.core }}
+        run: |
+          chmod +x ./gradlew
+          ./gradlew buildNativePlugins -PpocBaseVersion="$CORE" --no-daemon --console=plain
+
+      - name: List built ZIPs
+        shell: bash
+        run: find build -name 'cls-runner-*.zip' -type f -printf '%f\t%s bytes\n' | sort
+
+      - name: Publish to JetBrains Marketplace
+        uses: ./.github/actions/publish-to-marketplace
+        with:
+          marketplaceToken: ${{ secrets.JETBRAINS_MARKETPLACE_TOKEN }}
+          channel: ${{ inputs.channel }}
+          hidden: ${{ inputs.visibility == 'hidden' && 'true' || 'false' }}
+          pluginId: ${{ inputs.plugin_id }}
+
+      - name: Upload ZIPs as build artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cls-runner-${{ steps.ver.outputs.core }}
+          path: |
+            build/distributions/cls-runner-*.zip
+            build/native-distributions/cls-runner-*.zip
+          if-no-files-found: warn
+          retention-days: 7

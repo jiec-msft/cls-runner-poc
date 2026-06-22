@@ -42,11 +42,14 @@ pwsh scripts/download-binaries.ps1
 
 ## Publish
 
-- **Custom plugin repo** (fast iteration): `scripts/make-updatePlugins.ps1` +
-  `scripts/publish-release.ps1` upload the ZIPs to this repo's GitHub Releases and generate
-  `updatePlugins.xml`; point the IDE at it via Settings → Plugins → ⚙ → Manage Plugin Repositories.
-- **JetBrains Marketplace**: set `JETBRAINS_MARKETPLACE_TOKEN` and use IPGP's `publishPlugin`
-  (or upload manually). New plugins require moderation approval before they are installable.
+- **Custom plugin repo** (fast local iteration): `scripts/make-updatePlugins.ps1` stages the ZIPs +
+  generates `updatePlugins.xml`; `scripts/serve-repo.ps1` serves them on `http://localhost:8181`.
+  Point the IDE at it via Settings → Plugins → ⚙ → Manage Plugin Repositories.
+- **JetBrains Marketplace** (stable + nightly): the
+  [`Publish to Marketplace`](.github/workflows/publish-to-marketplace.yml) GitHub Actions workflow
+  builds the fat + slims and uploads them via curl (mirrors jb). Needs the repo secret
+  `JETBRAINS_MARKETPLACE_TOKEN`. New plugins require a one-time web-UI upload + moderation before the
+  workflow can publish updates. See [PUBLISHING.md](PUBLISHING.md).
 
 ## Layout
 

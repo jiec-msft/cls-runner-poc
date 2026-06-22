@@ -18,11 +18,11 @@ param(
 
 $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$nativeRoot = Join-Path $projectRoot "copilot-agent\native"
+$nativeRoot = Join-Path (Join-Path $projectRoot "copilot-agent") "native"
 
 $platforms = @("win32-x64", "win32-arm64", "darwin-x64", "darwin-arm64", "linux-x64", "linux-arm64")
 
-$work = Join-Path $env:TEMP ("cls-dl-" + [guid]::NewGuid().ToString("N"))
+$work = Join-Path ([System.IO.Path]::GetTempPath()) ("cls-dl-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Force -Path $work | Out-Null
 
 foreach ($p in $platforms) {

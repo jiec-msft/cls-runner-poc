@@ -16,7 +16,7 @@ In the IDE: **Settings → Plugins → ⚙ → Manage Plugin Repositories → `h
 then install "CLS Runner (POC)" from the Marketplace tab.
 
 Auto-update experiment: serve only the fat (`make-updatePlugins.ps1 -OnlyFat`), install on 2025.1,
-bump `pluginVersion` to `1.13.1-251`, rebuild + re-stage, then **Check for Updates**.
+bump `pocBaseVersion` to `1.13.1` (fat becomes `1.13.1-251`), rebuild + re-stage, then **Check for Updates**.
 
 ## B. JetBrains Marketplace (real routing + upgrade)
 
@@ -44,7 +44,38 @@ Max plugin size is **400 MB**; the fat is ~362 MB, so **both fat and slims fit**
 has the fat installed (e.g. after an IDE upgrade from 2025.1) is offered the matching slim as an
 **update** — the fat→slim migration this POC validates.
 
+## C. CI pipeline — stable + nightly channels
+
+The [`Publish to Marketplace`](.github/workflows/publish-to-marketplace.yml) workflow
+(`workflow_dispatch`) mirrors jb's flow: it builds the fat + 6 slims, then uploads each ZIP via
+curl to `/plugin/uploadPlugin` with `-F channel` + `isHidden` + retry
+([composite action](.github/actions/publish-to-marketplace/action.yml)). Uses repo secret
+`JETBRAINS_MARKETPLACE_TOKEN`.
+
+Inputs: `channel` (stable | nightly), `visibility` (hidden | visible), `release_version` (core),
+`plugin_id` (numeric, optional — recommended once known).
+
+### SemVer: how nightly stays above stable (the jb trick)
+
+The core version is the single source of truth (`-PpocBaseVersion`); the build derives
+`{core}-251` (fat) and `{core}-261-{os}-{arch}` (slims).
+
+| channel | core | fat | example slim |
+|---|---|---|---|
+| stable | `1.13.0` | `1.13.0-251` | `1.13.0-261-windows-x64` |
+| nightly | `1.13.1-nightly.<run>` | `1.13.1-nightly.<run>-251` | `1.13.1-nightly.<run>-261-windows-x64` |
+
+Nightly **bumps the patch** (`1.13.0` → `1.13.1`) before appending `-nightly.<run>`, so the nightly
+core (`1.13.1-nightly.<run>`) sorts **above** the latest stable (`1.13.0`). Without the bump,
+`1.13.0-nightly.<run>` would be a pre-release of `1.13.0` and sort *below* stable, so nightly-channel
+users would never be offered the update. `<run>` (`github.run_number`) keeps successive nightlies
+monotonically increasing. This mirrors jb `release.yml`.
+
+> First run for a brand-new plugin: do the one-time web-UI upload (§B.1) first so the plugin exists,
+> then set `plugin_id` and run the workflow for every subsequent version.
+
 ## Experiments to record (findings)
+
 
 1. Fresh install: 2025.1 → fat; 2026.1 Win-x64 → `windows-x64` slim.
 2. Upgrade: install fat on 2025.1 → upgrade IDE to 2026.1 → slim offered as update.

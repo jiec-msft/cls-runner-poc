@@ -11,11 +11,12 @@ plugins {
 
 group = "com.jiec.cls"
 
-val pocBaseVersion = providers.gradleProperty("pocBaseVersion").get()      // 1.13.0
-val fatVersion = providers.gradleProperty("pluginVersion").get()           // 1.13.0-251
+val pocBaseVersion = providers.gradleProperty("pocBaseVersion").get()      // 1.13.0 (stable) | 1.13.1-nightly.<run> (nightly)
 val fatSinceBuild = providers.gradleProperty("sinceBuild").get()           // 251
 val fatUntilBuild = providers.gradleProperty("untilBuild").get()           // 260.*
 val nativeSinceBuild = providers.gradleProperty("nativeSinceBuild").get()  // 261
+// fat carries the -251 suffix; slims get -261-{os}-{arch} via NativePluginPatcher.
+val fatVersion = "$pocBaseVersion-$fatSinceBuild"                          // e.g. 1.13.0-251
 
 version = fatVersion
 

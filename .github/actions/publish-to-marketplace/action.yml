@@ -1,0 +1,91 @@
+---
+name: publish-to-marketplace
+description: 'Upload the fat + slim plugin ZIPs to JetBrains Marketplace (curl + retry). Mirrors jb .github/actions/publish-to-marketplace.'
+
+inputs:
+  marketplaceToken:
+    description: 'JetBrains Marketplace permanent token'
+    required: true
+  channel:
+    description: 'Publication channel: stable or nightly'
+    required: true
+  hidden:
+    description: 'Publish as hidden (true/false)'
+    required: false
+    default: 'false'
+  xmlId:
+    description: 'plugin.xml <id> (used when pluginId is empty)'
+    required: false
+    default: 'com.jiec.cls.runner'
+  pluginId:
+    description: 'Numeric Marketplace plugin id; if set, used instead of xmlId (more reliable)'
+    required: false
+    default: ''
+  maxRetries:
+    description: 'Total attempts per ZIP'
+    required: false
+    default: '10'
+
+runs:
+  using: composite
+  steps:
+    - name: Upload all plugin ZIPs
+      shell: bash
+      env:
+        MARKETPLACE_TOKEN: ${{ inputs.marketplaceToken }}
+        CHANNEL: ${{ inputs.channel }}
+        HIDDEN: ${{ inputs.hidden }}
+        XML_ID: ${{ inputs.xmlId }}
+        PLUGIN_ID: ${{ inputs.pluginId }}
+        MAX_RETRIES: ${{ inputs.maxRetries }}
+      run: |
+        set -uo pipefail
+
+        # Prefer numeric pluginId (exactly jb's path); fall back to xmlId.
+        ID_OPTS=()
+        if [ -n "$PLUGIN_ID" ]; then
+          ID_OPTS=(-F "pluginId=$PLUGIN_ID")
+          echo "Identifying plugin by pluginId=$PLUGIN_ID"
+        else
+          ID_OPTS=(-F "xmlId=$XML_ID")
+          echo "Identifying plugin by xmlId=$XML_ID"
+        fi
+        HIDDEN_OPTS=()
+        if [ "$HIDDEN" = "true" ]; then HIDDEN_OPTS=(-F "isHidden=true"); echo "Publishing as hidden"; fi
+
+        mapfile -t ZIPS < <(find build -name 'cls-runner-*.zip' -type f | sort)
+        if [ ${#ZIPS[@]} -eq 0 ]; then echo "❌ No cls-runner-*.zip found under build/"; exit 1; fi
+        echo "Found ${#ZIPS[@]} ZIP(s) to publish to channel '$CHANNEL'"
+
+        publish_one() {
+          local file="$1"
+          local mb; mb=$(( $(stat -c%s "$file") / 1024 / 1024 ))
+          for attempt in $(seq 1 "$MAX_RETRIES"); do
+            echo "  [$(basename "$file") ${mb}MB] attempt $attempt/$MAX_RETRIES"
+            local tmp; tmp=$(mktemp)
+            local code
+            code=$(curl -w "%{http_code}" -s -o "$tmp" \
+              --header "Authorization: Bearer $MARKETPLACE_TOKEN" \
+              "${ID_OPTS[@]}" \
+              -F "file=@${file}" \
+              -F "channel=${CHANNEL}" \
+              "${HIDDEN_OPTS[@]}" \
+              https://plugins.jetbrains.com/plugin/uploadPlugin)
+            local body; body=$(cat "$tmp"); rm -f "$tmp"
+            echo "    HTTP $code"
+            if [ "$code" = "201" ]; then echo "    ✅ published"; return 0; fi
+            # Re-uploading an existing version is fine (e.g. re-running stable with the same core).
+            if [ "$code" = "400" ] && echo "$body" | grep -qi "already contains version"; then
+              echo "    ✅ version already exists - treating as success"; return 0
+            fi
+            echo "    response: $body"
+            if [ "$attempt" -lt "$MAX_RETRIES" ]; then echo "    ⏳ retry in 30s..."; sleep 30; fi
+          done
+          echo "  ❌ failed: $(basename "$file")"
+          return 1
+        }
+
+        FAIL=0
+        for z in "${ZIPS[@]}"; do publish_one "$z" || FAIL=1; done
+        if [ "$FAIL" -ne 0 ]; then echo "❌ One or more uploads failed"; exit 1; fi
+        echo "✅ All ${#ZIPS[@]} ZIP(s) published to '$CHANNEL'"
