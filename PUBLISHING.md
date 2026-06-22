@@ -1,0 +1,52 @@
+# Publishing & test runbook
+
+Two channels: a **local custom repo** (fast iteration, no moderation) and the **real
+JetBrains Marketplace** (true server-side OS/arch routing + the fat→slim upgrade prompt).
+
+## A. Local custom plugin repo (fast loop)
+
+```powershell
+pwsh scripts/download-binaries.ps1        # once, ~590 MB
+./gradlew buildNativePlugins              # fat + 6 slims
+pwsh scripts/make-updatePlugins.ps1       # stage dist-repo/ + updatePlugins.xml
+pwsh scripts/serve-repo.ps1               # serve http://localhost:8181
+```
+
+In the IDE: **Settings → Plugins → ⚙ → Manage Plugin Repositories → `http://localhost:8181/updatePlugins.xml`**,
+then install "CLS Runner (POC)" from the Marketplace tab.
+
+Auto-update experiment: serve only the fat (`make-updatePlugins.ps1 -OnlyFat`), install on 2025.1,
+bump `pluginVersion` to `1.13.1-251`, rebuild + re-stage, then **Check for Updates**.
+
+## B. JetBrains Marketplace (real routing + upgrade)
+
+Max plugin size is **400 MB**; the fat is ~362 MB, so **both fat and slims fit**.
+
+1. **Create the listing (once, web UI)** — https://plugins.jetbrains.com/plugin/add → upload the fat
+   `cls-runner-1.13.0-251.zip`. This creates plugin id `com.jiec.cls.runner` and starts moderation.
+   To stay semi-private (like jb nightly), publish to a non-default **channel** and/or use
+   **isHidden**; users install by adding the channel repo URL.
+2. **Get a token** — https://plugins.jetbrains.com/author/me/tokens (a `perm:...` token).
+3. **Upload the rest (script)**:
+   ```powershell
+   pwsh scripts/publish-marketplace.ps1 -Token perm:xxxx               # all built zips
+   pwsh scripts/publish-marketplace.ps1 -Token perm:xxxx -Channel nightly -Hidden
+   ```
+
+### Version / routing recap
+
+| Artifact | version | since/until | os/arch depends |
+|---|---|---|---|
+| fat | `1.13.0-251` | 251 / 260.* | — |
+| slim ×6 | `1.13.0-261-{os}-{arch}` | 261 / — | `os.*` + `arch.*` |
+
+`1.13.0-261-…` sorts **newer** than `1.13.0-251` (token `261 > 251`), so a 2026.1 IDE that still
+has the fat installed (e.g. after an IDE upgrade from 2025.1) is offered the matching slim as an
+**update** — the fat→slim migration this POC validates.
+
+## Experiments to record (findings)
+
+1. Fresh install: 2025.1 → fat; 2026.1 Win-x64 → `windows-x64` slim.
+2. Upgrade: install fat on 2025.1 → upgrade IDE to 2026.1 → slim offered as update.
+3. Auto-update notification timing (custom repo, fat→newer fat; slim not offered to 251).
+4. Button: Tools → "Launch CLS (--stdio)" → notification with abs path + PID.
