@@ -43,6 +43,11 @@ on:
         type: string
         required: false
         default: ''
+      dry_run:
+        description: 'Build only — skip the Marketplace upload (validate the pipeline safely)'
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -105,6 +110,7 @@ jobs:
         run: find build -name 'cls-runner-*.zip' -type f -printf '%f\t%s bytes\n' | sort
 
       - name: Publish to JetBrains Marketplace
+        if: ${{ !inputs.dry_run }}
         uses: ./.github/actions/publish-to-marketplace
         with:
           marketplaceToken: ${{ secrets.JETBRAINS_MARKETPLACE_TOKEN }}
