@@ -1,0 +1,19 @@
+# Build output
+.gradle/
+build/
+buildSrc/build/
+buildSrc/.gradle/
+
+# IntelliJ Platform SDK cache downloaded by IPGP
+.intellijPlatform/
+
+# Real CLS binaries (~590 MB) — re-fetch with scripts/download-binaries.ps1, never commit
+copilot-agent/native/
+
+# Staged custom plugin repo (zips + updatePlugins.xml) and build log
+dist-repo/
+build-log.txt
+
+# Local IDE project files
+.idea/
+*.iml
