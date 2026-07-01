@@ -68,14 +68,19 @@ pwsh scripts/download-binaries.ps1
 
 ## Publish
 
-- **Custom plugin repo** (fast local iteration): `scripts/make-updatePlugins.ps1` stages the ZIPs +
-  generates `updatePlugins.xml`; `scripts/serve-repo.ps1` serves them on `http://localhost:8181`.
-  Point the IDE at it via Settings → Plugins → ⚙ → Manage Plugin Repositories.
-- **JetBrains Marketplace** (stable + nightly): the
-  [`Publish to Marketplace`](.github/workflows/publish-to-marketplace.yml) GitHub Actions workflow
-  builds the fat + slims and uploads them via curl (mirrors jb). Needs the repo secret
-  `JETBRAINS_MARKETPLACE_TOKEN`. New plugins require a one-time web-UI upload + moderation before the
-  workflow can publish updates. See [PUBLISHING.md](PUBLISHING.md).
+Everything is published to and tested on the **real JetBrains Marketplace** (stable + nightly
+channels) via GitHub Actions:
+
+- [`Publish to Marketplace`](.github/workflows/publish-to-marketplace.yml) — one
+  `(version, mode, channel)` per dispatch.
+- [`Publish timeline (v1..v9)`](.github/workflows/publish-timeline.yml) — the whole split-plugin
+  lifecycle in one dispatch; `up_to=N` publishes only the `v1..vN` prefix (used to observe each
+  migration before the next version supersedes it).
+
+Both build the fat + 6 slims and upload via curl (mirrors jb); they need the repo secret
+`JETBRAINS_MARKETPLACE_TOKEN`. A brand-new plugin needs a one-time web-UI upload + moderation; id
+`32412` already exists, so the workflows handle every version. Runbook: [PUBLISHING.md](PUBLISHING.md);
+end-to-end plan: [TEST-SCENARIOS.md](TEST-SCENARIOS.md).
 
 ## Layout
 
@@ -85,5 +90,5 @@ buildSrc/.../NativePluginPatcher.kt        # fat ZIP -> 6 slim ZIPs (adapted fro
 src/main/kotlin/.../LaunchClsAction.kt      # the launch button (runs off the EDT)
 src/main/resources/META-INF/plugin.xml
 copilot-agent/native/<6 platforms>/...      # real binaries (gitignored, fetched by the script)
-scripts/                                    # download / updatePlugins / release helpers
+scripts/                                    # download-binaries / publish-marketplace / verify-zips
 ```

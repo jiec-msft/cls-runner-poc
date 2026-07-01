@@ -79,14 +79,13 @@ runs:
               echo "    ✅ version already exists - treating as success"; return 0
             fi
             echo "    response: $body"
-            # os/arch-constrained slims are restricted to JetBrains-authored plugins (Marketplace
-            # policy, HTTP 400). Expected for this POC's slims -> SKIP (not a failure), and DON'T
-            # retry: the policy is permanent. Publish slims via a custom plugin repo instead.
-            if echo "$body" | grep -qi "JetBrains-authored"; then
-              echo "    ⏭️  SKIP: os/arch-constrained plugin not allowed for non-JetBrains vendors on Marketplace"
-              return 2
-            fi
-            # Any other 4xx is a permanent client error; retrying won't help.
+            # NOTE: os/arch module <depends> (com.intellij.modules.os.* / .arch.*) USED TO be
+            # restricted to JetBrains-authored plugins (HTTP 400 "...JetBrains-authored..."), so an
+            # earlier version of this action treated that as an expected SKIP. JetBrains has since
+            # enabled os/arch routing for ALL third-party plugin ids, so the slims now publish
+            # normally (HTTP 201). If that 400 ever returns it is a real regression (or the feature
+            # was turned off again) -> fall through to the generic 4xx handler and FAIL, don't skip.
+            # Any 4xx is a permanent client error; retrying won't help.
             if [ "$code" -ge 400 ] && [ "$code" -lt 500 ]; then
               echo "    ❌ non-retryable client error (HTTP $code)"; return 1
             fi
@@ -97,16 +96,12 @@ runs:
         }
 
         FAIL=0
-        SKIP=0
         for z in "${ZIPS[@]}"; do
           # -e-safe: GitHub runs this step with `bash -e`, so capture the return code via `|| rc=$?`
-          # (a bare `publish_one; rc=$?` would abort the whole step on the first skip/failure).
+          # (a bare `publish_one; rc=$?` would abort the whole step on the first failure).
           rc=0
           publish_one "$z" || rc=$?
-          if [ "$rc" -eq 1 ]; then FAIL=1; elif [ "$rc" -eq 2 ]; then SKIP=$((SKIP + 1)); fi
+          if [ "$rc" -ne 0 ]; then FAIL=1; fi
         done
-        if [ "$SKIP" -gt 0 ]; then
-          echo "⏭️  $SKIP artifact(s) skipped: os/arch-constrained plugins are Marketplace-restricted to JetBrains-authored vendors. Use a custom plugin repo for slims."
-        fi
         if [ "$FAIL" -ne 0 ]; then echo "❌ One or more uploads failed"; exit 1; fi
-        echo "✅ Done: published $(( ${#ZIPS[@]} - SKIP )), skipped $SKIP, to channel '$CHANNEL'"
+        echo "✅ Done: published ${#ZIPS[@]} artifact(s) to channel '$CHANNEL'"

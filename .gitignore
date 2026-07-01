@@ -10,8 +10,7 @@ buildSrc/.gradle/
 # Real CLS binaries (~590 MB) — re-fetch with scripts/download-binaries.ps1, never commit
 copilot-agent/native/
 
-# Staged custom plugin repo (zips + updatePlugins.xml) and build log
-dist-repo/
+# Local build log
 build-log.txt
 
 # Local IDE project files
