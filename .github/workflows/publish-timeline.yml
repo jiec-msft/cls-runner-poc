@@ -117,9 +117,15 @@ jobs:
               if [ "$code" = "400" ] && echo "$body" | grep -qi "already contains version"; then
                 echo "      ✅ already exists"; return 0; fi
               echo "      response: $body"
-              # os/arch slims now publish for 3rd-party ids (feature enabled) — a JetBrains-authored
-              # 400 here would be a real regression, so any 4xx fails.
-              if [ "$code" -ge 400 ] && [ "$code" -lt 500 ]; then echo "      ❌ client error"; return 1; fi
+              # A 400 "Out of memory" is a TRANSIENT Marketplace server condition on the large-upload
+              # (362MB fat) path — observed intermittently on identical zips — so retry it. os/arch
+              # slims now publish for 3rd-party ids (feature enabled); any OTHER 4xx is a real client
+              # error and fails.
+              if [ "$code" = "400" ] && echo "$body" | grep -qi "out of memory"; then
+                echo "      ⚠️ transient server OOM — will retry"
+              elif [ "$code" -ge 400 ] && [ "$code" -lt 500 ]; then
+                echo "      ❌ client error"; return 1
+              fi
               [ "$attempt" -lt 10 ] && { echo "      ⏳ retry in 30s"; sleep 30; }
             done
             return 1

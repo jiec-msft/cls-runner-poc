@@ -79,15 +79,22 @@ runs:
               echo "    ✅ version already exists - treating as success"; return 0
             fi
             echo "    response: $body"
-            # NOTE: os/arch module <depends> (com.intellij.modules.os.* / .arch.*) USED TO be
-            # restricted to JetBrains-authored plugins (HTTP 400 "...JetBrains-authored..."), so an
-            # earlier version of this action treated that as an expected SKIP. JetBrains has since
-            # enabled os/arch routing for ALL third-party plugin ids, so the slims now publish
-            # normally (HTTP 201). If that 400 ever returns it is a real regression (or the feature
-            # was turned off again) -> fall through to the generic 4xx handler and FAIL, don't skip.
-            # Any 4xx is a permanent client error; retrying won't help.
-            if [ "$code" -ge 400 ] && [ "$code" -lt 500 ]; then
-              echo "    ❌ non-retryable client error (HTTP $code)"; return 1
+            # A 400 "Out of memory" is a TRANSIENT Marketplace server condition on the large-upload
+            # (362MB fat) path — observed intermittently on identical zips — so retry it instead of
+            # failing.
+            if [ "$code" = "400" ] && echo "$body" | grep -qi "out of memory"; then
+              echo "    ⚠️ transient server OOM — will retry"
+            else
+              # NOTE: os/arch module <depends> (com.intellij.modules.os.* / .arch.*) USED TO be
+              # restricted to JetBrains-authored plugins (HTTP 400 "...JetBrains-authored..."), so an
+              # earlier version of this action treated that as an expected SKIP. JetBrains has since
+              # enabled os/arch routing for ALL third-party plugin ids, so the slims now publish
+              # normally (HTTP 201). If that 400 ever returns it is a real regression (or the feature
+              # was turned off again) -> fall through to the generic 4xx handler and FAIL, don't skip.
+              # Any other 4xx is a permanent client error; retrying won't help.
+              if [ "$code" -ge 400 ] && [ "$code" -lt 500 ]; then
+                echo "    ❌ non-retryable client error (HTTP $code)"; return 1
+              fi
             fi
             if [ "$attempt" -lt "$MAX_RETRIES" ]; then echo "    ⏳ retry in 30s..."; sleep 30; fi
           done
