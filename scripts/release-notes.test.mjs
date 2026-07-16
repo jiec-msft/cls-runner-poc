@@ -106,6 +106,19 @@ suite('createReleaseBody', () => {
       /Release notes are empty/,
     );
   });
+
+  test('should reject repository links in reviewed release-note content', () => {
+    assert.throws(
+      () =>
+        createReleaseBody('- Internal details: https://github.com/jiec-msft/cls-runner-poc/issues/1', {
+          repository: 'jiec-msft/cls-runner-poc',
+          commit: '0123456789abcdef0123456789abcdef01234567',
+          startLine: 1,
+          endLine: 1,
+        }),
+      /Release notes must not contain repository links/,
+    );
+  });
 });
 
 suite('release-notes CLI', () => {

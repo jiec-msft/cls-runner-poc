@@ -56,8 +56,13 @@ export function createReleaseBody(
     throw new Error('Release notes are empty');
   }
 
+  const repositoryUrl = `${serverUrl}/${repository}`;
+  if (notes.includes(repositoryUrl)) {
+    throw new Error(`Release notes must not contain repository links: ${repositoryUrl}`);
+  }
+
   const sourceUrl =
-    `${serverUrl}/${repository}/blob/${commit}/CHANGELOG.md` +
+    `${repositoryUrl}/blob/${commit}/CHANGELOG.md` +
     `?plain=1#L${startLine}-L${endLine}`;
   const source = `_Release notes source: [CHANGELOG.md at ${commit.slice(0, 7)}](${sourceUrl})._`;
 
