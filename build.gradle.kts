@@ -1,5 +1,7 @@
 import com.jiec.cls.runner.gradle.NativePluginPatcher
 import org.gradle.api.tasks.bundling.Zip
+import org.jetbrains.changelog.Changelog
+import org.jetbrains.intellij.platform.gradle.tasks.PatchPluginXmlTask
 import org.jetbrains.intellij.platform.gradle.tasks.PrepareSandboxTask
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.dsl.KotlinVersion
@@ -7,11 +9,13 @@ import org.jetbrains.kotlin.gradle.dsl.KotlinVersion
 plugins {
     kotlin("jvm") version "2.1.20"
     id("org.jetbrains.intellij.platform") version "2.16.0"
+    id("org.jetbrains.changelog") version "2.5.0"
 }
 
 group = "com.jiec.cls"
 
 val pocBaseVersion = providers.gradleProperty("pocBaseVersion").get()      // 1.13.0 (stable) | 1.13.1-nightly.<run> (nightly)
+val releaseNotesVersion = providers.gradleProperty("releaseNotesVersion").orNull
 val fatSinceBuild = providers.gradleProperty("sinceBuild").get()           // 251
 val fatUntilBuild = providers.gradleProperty("untilBuild").get()           // 260.*
 val nativeSinceBuild = providers.gradleProperty("nativeSinceBuild").get()  // 261
@@ -78,6 +82,28 @@ kotlin {
 java {
     sourceCompatibility = JavaVersion.VERSION_21
     targetCompatibility = JavaVersion.VERSION_21
+}
+
+tasks.withType<PatchPluginXmlTask> {
+    changeNotes.set(provider {
+        val item = releaseNotesVersion
+            ?.let(changelog::get)
+            ?: changelog.getUnreleased()
+        changelog.renderItem(
+            item.withHeader(false).withEmptySections(false),
+            Changelog.OutputType.HTML,
+        )
+    })
+}
+
+changelog {
+    version.set(releaseNotesVersion ?: pocBaseVersion.substringBefore("-nightly"))
+    path.set("${project.rootDir}/CHANGELOG.md")
+    header.set(provider { "[${version.get()}]" })
+    headerParserRegex.set("""\d+\.\d+\.\d+""".toRegex())
+    keepUnreleasedSection.set(true)
+    unreleasedTerm.set("[Unreleased]")
+    groups.set(listOf("New Features", "UX Improvements", "Bug Fixes", "Changed", "Deprecation"))
 }
 
 // --- Bundle the 6 real CLS binaries into the plugin distribution. ---

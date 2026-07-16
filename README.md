@@ -82,6 +82,34 @@ Both build the fat + 6 slims and upload via curl (mirrors jb); they need the rep
 `32412` already exists, so the workflows handle every version. Runbook: [PUBLISHING.md](PUBLISHING.md);
 end-to-end plan: [TEST-SCENARIOS.md](TEST-SCENARIOS.md).
 
+## Release-note sandbox
+
+[`Changelog Release POC`](.github/workflows/changelog-release-poc.yml) is the long-lived sandbox for
+changes to the JB release-note pipeline. It uses `org.jetbrains.changelog` 2.5.0, the same version as
+JB, and validates these mappings:
+
+| Build | `CHANGELOG.md` section |
+|---|---|
+| Nightly | `[Unreleased]` |
+| `1.14.0-rc.N` | `[1.14.0]` |
+| `1.14.0` | `[1.14.0]` |
+| Old-line hotfix `1.12.2` | `[1.12.2]` |
+
+The workflow produces both outputs from the same parsed changelog item:
+
+- HTML in `plugin.xml` for JetBrains Marketplace change notes.
+- Markdown in the GitHub Release body, followed by an immutable link to the exact source lines.
+
+Run with `dry_run=true` first. For the Marketplace rendering check, choose a version that has never
+been uploaded, set `dry_run=false`, keep `visibility=hidden`, and verify that headings such as
+`### Bug Fixes` render as headings on the hidden Marketplace version page.
+
+The deterministic version, source-range, and release-body behavior is tested without dependencies:
+
+```powershell
+node --test scripts/release-notes.test.mjs
+```
+
 ## Layout
 
 ```

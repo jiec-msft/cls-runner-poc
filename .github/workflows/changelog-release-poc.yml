@@ -1,0 +1,250 @@
+---
+name: Changelog Release POC
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_kind:
+        description: 'Release-note source: nightly uses Unreleased; release uses the base version'
+        type: choice
+        required: true
+        default: release
+        options:
+          - nightly
+          - release
+      release_version:
+        description: 'Release version or nightly baseline, for example 1.14.0-rc.1 or 1.14.0'
+        type: string
+        required: true
+        default: '1.14.0-rc.1'
+      marketplace_channel:
+        description: 'JetBrains Marketplace channel'
+        type: choice
+        required: true
+        default: nightly
+        options:
+          - nightly
+          - stable
+      visibility:
+        description: 'Publish as hidden or visible'
+        type: choice
+        required: true
+        default: hidden
+        options:
+          - hidden
+          - visible
+      build_mode:
+        description: 'split builds the fat + 6 slim plugins; universal builds one legacy plugin'
+        type: choice
+        required: true
+        default: split
+        options:
+          - split
+          - universal
+      plugin_id:
+        description: 'Numeric Marketplace plugin id'
+        type: string
+        required: false
+        default: '32412'
+      dry_run:
+        description: 'Build only; skip Marketplace upload'
+        type: boolean
+        required: false
+        default: true
+      publish_github_release:
+        description: 'Create or overwrite a POC GitHub Release body'
+        type: boolean
+        required: false
+        default: false
+      github_release_tag:
+        description: 'Optional changelog-poc-* tag; defaults to changelog-poc-v<computed version>'
+        type: string
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-publish:
+    name: Build and publish release-note POC
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Test release-note helper
+        run: node --test scripts/release-notes.test.mjs
+
+      - name: Resolve plugin version and changelog section
+        id: release
+        shell: bash
+        env:
+          RELEASE_KIND: ${{ inputs.release_kind }}
+          RELEASE_VERSION: ${{ inputs.release_version }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          RELEASE_VERSION="${RELEASE_VERSION#v}"
+          SECTION=$(node scripts/release-notes.mjs section "$RELEASE_KIND" "$RELEASE_VERSION")
+
+          if [ "$RELEASE_KIND" = "nightly" ]; then
+            IFS=. read -r MAJOR MINOR PATCH_WITH_SUFFIX <<< "$RELEASE_VERSION"
+            PATCH="${PATCH_WITH_SUFFIX%%-*}"
+            CORE="${MAJOR}.${MINOR}.$((PATCH + 1))-nightly.${RUN_NUMBER}"
+          else
+            CORE="$RELEASE_VERSION"
+          fi
+
+          echo "core=$CORE" >> "$GITHUB_OUTPUT"
+          echo "section=$SECTION" >> "$GITHUB_OUTPUT"
+          echo "Plugin version: $CORE"
+          echo "CHANGELOG section: [$SECTION]"
+
+      - name: Generate release notes and GitHub Release body
+        shell: bash
+        env:
+          CORE: ${{ steps.release.outputs.core }}
+          SECTION: ${{ steps.release.outputs.section }}
+        run: |
+          set -euo pipefail
+          chmod +x ./gradlew
+
+          GRADLE_PROPERTIES=("-PpocBaseVersion=$CORE")
+          CHANGELOG_OPTIONS=()
+          if [ "$SECTION" = "Unreleased" ]; then
+            CHANGELOG_OPTIONS+=("--unreleased")
+          else
+            GRADLE_PROPERTIES+=("-PreleaseNotesVersion=$SECTION")
+            CHANGELOG_OPTIONS+=("--project-version=$SECTION")
+          fi
+
+          ./gradlew "${GRADLE_PROPERTIES[@]}" getChangelog \
+            "${CHANGELOG_OPTIONS[@]}" \
+            --no-header \
+            --no-links \
+            --no-empty-sections \
+            --output-file=build/release-notes.md \
+            --no-daemon \
+            --console=plain
+
+          COMMIT=$(git rev-parse HEAD)
+          node scripts/release-notes.mjs body \
+            --changelog CHANGELOG.md \
+            --notes build/release-notes.md \
+            --section "$SECTION" \
+            --repository "$GITHUB_REPOSITORY" \
+            --commit "$COMMIT" \
+            --server-url "$GITHUB_SERVER_URL" \
+            --output build/release-body.md
+
+          echo "=== Release notes ==="
+          cat build/release-notes.md
+          echo "=== GitHub Release body ==="
+          cat build/release-body.md
+
+      - name: Download CLS binaries
+        shell: pwsh
+        run: ./scripts/download-binaries.ps1
+
+      - name: Build plugin ZIPs
+        shell: bash
+        env:
+          CORE: ${{ steps.release.outputs.core }}
+          SECTION: ${{ steps.release.outputs.section }}
+          BUILD_MODE: ${{ inputs.build_mode }}
+        run: |
+          set -euo pipefail
+          GRADLE_PROPERTIES=("-PpocBaseVersion=$CORE")
+          if [ "$SECTION" != "Unreleased" ]; then
+            GRADLE_PROPERTIES+=("-PreleaseNotesVersion=$SECTION")
+          fi
+
+          if [ "$BUILD_MODE" = "universal" ]; then
+            ./gradlew "${GRADLE_PROPERTIES[@]}" buildPlugin \
+              -PuniversalBuild=true \
+              --no-daemon \
+              --console=plain
+          else
+            ./gradlew "${GRADLE_PROPERTIES[@]}" buildNativePlugins \
+              --no-daemon \
+              --console=plain
+          fi
+
+      - name: Verify generated change notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          PLUGIN_XML=build/tmp/patchPluginXml/plugin.xml
+          grep -F '<change-notes>' "$PLUGIN_XML"
+          grep -F '<h3>' "$PLUGIN_XML"
+
+      - name: Create or overwrite POC GitHub Release
+        if: ${{ inputs.publish_github_release }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CORE: ${{ steps.release.outputs.core }}
+          INPUT_TAG: ${{ inputs.github_release_tag }}
+        run: |
+          set -euo pipefail
+          COMMIT=$(git rev-parse HEAD)
+          TAG="${INPUT_TAG:-changelog-poc-v${CORE}}"
+          if [[ "$TAG" != changelog-poc-* ]]; then
+            echo "POC release tags must start with changelog-poc-"
+            exit 1
+          fi
+
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            TAG_COMMIT=$(gh api "repos/$GITHUB_REPOSITORY/commits/$TAG" --jq .sha)
+            if [ "$TAG_COMMIT" != "$COMMIT" ]; then
+              echo "Existing tag $TAG points to $TAG_COMMIT, expected $COMMIT"
+              exit 1
+            fi
+            gh release edit "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "Release notes POC $CORE" \
+              --notes-file build/release-body.md \
+              --prerelease
+          else
+            gh release create "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$COMMIT" \
+              --title "Release notes POC $CORE" \
+              --notes-file build/release-body.md \
+              --prerelease
+          fi
+
+      - name: Publish hidden plugin to JetBrains Marketplace
+        if: ${{ !inputs.dry_run }}
+        uses: ./.github/actions/publish-to-marketplace
+        with:
+          marketplaceToken: ${{ secrets.JETBRAINS_MARKETPLACE_TOKEN }}
+          channel: ${{ inputs.marketplace_channel }}
+          hidden: ${{ inputs.visibility == 'hidden' && 'true' || 'false' }}
+          pluginId: ${{ inputs.plugin_id }}
+
+      - name: Upload POC artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: changelog-release-poc-${{ steps.release.outputs.core }}
+          path: |
+            build/distributions/cls-runner-*.zip
+            build/native-distributions/cls-runner-*.zip
+            build/release-notes.md
+            build/release-body.md
+            build/tmp/patchPluginXml/plugin.xml
+          if-no-files-found: warn
+          retention-days: 7
