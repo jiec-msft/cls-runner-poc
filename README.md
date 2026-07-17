@@ -107,7 +107,7 @@ been uploaded, set `dry_run=false`, keep `visibility=hidden`, and verify that he
 The deterministic version, source-range, and release-body behavior is tested without dependencies:
 
 ```powershell
-node --test scripts/release-notes.test.mjs
+node --test .github/workflows/scripts/release-notes/release-notes.test.mjs
 ```
 
 ## Layout

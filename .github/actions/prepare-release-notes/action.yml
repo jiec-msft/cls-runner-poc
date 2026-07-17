@@ -1,0 +1,109 @@
+---
+name: prepare-release-notes
+description: 'Generate changelog-backed Markdown and a GitHub Release body'
+
+inputs:
+  releaseKind:
+    description: 'nightly reads Unreleased; release reads the normalized base version'
+    required: true
+  releaseVersion:
+    description: 'Release version, for example 1.14.0-rc.1; ignored for nightly section selection'
+    required: true
+  pluginVersion:
+    description: 'Plugin version used to configure Gradle'
+    required: true
+  repository:
+    description: 'GitHub owner/repository used in the source permalink'
+    required: true
+  commit:
+    description: 'Full commit SHA used in the immutable source permalink'
+    required: true
+  serverUrl:
+    description: 'GitHub server URL'
+    required: false
+    default: 'https://github.com'
+  outputDirectory:
+    description: 'Directory for generated Markdown files'
+    required: false
+    default: 'build/release-notes'
+
+outputs:
+  section:
+    description: 'Selected CHANGELOG.md section'
+    value: ${{ steps.metadata.outputs.section }}
+  release_notes_version:
+    description: 'Base release version, empty for nightly'
+    value: ${{ steps.metadata.outputs.release_notes_version }}
+  release_notes_path:
+    description: 'Generated release-note Markdown path'
+    value: ${{ steps.generate.outputs.release_notes_path }}
+  release_body_path:
+    description: 'Generated GitHub Release body path'
+    value: ${{ steps.generate.outputs.release_body_path }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve changelog section
+      id: metadata
+      shell: bash
+      env:
+        RELEASE_KIND: ${{ inputs.releaseKind }}
+        RELEASE_VERSION: ${{ inputs.releaseVersion }}
+      run: |
+        set -euo pipefail
+        SCRIPT=".github/workflows/scripts/release-notes/release-notes.mjs"
+        SECTION=$(node "$SCRIPT" section "$RELEASE_KIND" "$RELEASE_VERSION")
+        echo "section=$SECTION" >> "$GITHUB_OUTPUT"
+        if [ "$RELEASE_KIND" = "release" ]; then
+          echo "release_notes_version=$SECTION" >> "$GITHUB_OUTPUT"
+        else
+          echo "release_notes_version=" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Generate release notes
+      id: generate
+      shell: bash
+      env:
+        COMMIT: ${{ inputs.commit }}
+        OUTPUT_DIRECTORY: ${{ inputs.outputDirectory }}
+        PLUGIN_VERSION: ${{ inputs.pluginVersion }}
+        RELEASE_KIND: ${{ inputs.releaseKind }}
+        REPOSITORY: ${{ inputs.repository }}
+        SECTION: ${{ steps.metadata.outputs.section }}
+        SERVER_URL: ${{ inputs.serverUrl }}
+      run: |
+        set -euo pipefail
+        chmod +x gradlew
+
+        RELEASE_NOTES_PATH="$OUTPUT_DIRECTORY/release-notes.md"
+        RELEASE_BODY_PATH="$OUTPUT_DIRECTORY/release-body.md"
+        GRADLE_PROPERTIES=("-PpocBaseVersion=$PLUGIN_VERSION")
+        CHANGELOG_OPTIONS=()
+        if [ "$RELEASE_KIND" = "nightly" ]; then
+          CHANGELOG_OPTIONS+=("--unreleased")
+        else
+          GRADLE_PROPERTIES+=("-PreleaseNotesVersion=$SECTION")
+          CHANGELOG_OPTIONS+=("--project-version=$SECTION")
+        fi
+
+        ./gradlew "${GRADLE_PROPERTIES[@]}" getChangelog \
+          "${CHANGELOG_OPTIONS[@]}" \
+          --no-header \
+          --no-links \
+          --no-empty-sections \
+          "--output-file=$RELEASE_NOTES_PATH" \
+          --no-daemon \
+          --console=plain
+
+        node .github/workflows/scripts/release-notes/release-notes.mjs body \
+          --changelog CHANGELOG.md \
+          --notes "$RELEASE_NOTES_PATH" \
+          --section "$SECTION" \
+          --repository "$REPOSITORY" \
+          --commit "$COMMIT" \
+          --server-url "$SERVER_URL" \
+          --output "$RELEASE_BODY_PATH"
+
+        echo "release_notes_path=$RELEASE_NOTES_PATH" >> "$GITHUB_OUTPUT"
+        echo "release_body_path=$RELEASE_BODY_PATH" >> "$GITHUB_OUTPUT"
