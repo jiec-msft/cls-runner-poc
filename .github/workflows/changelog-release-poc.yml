@@ -85,9 +85,9 @@ jobs:
           node-version: '22'
 
       - name: Test release-note helper
-        run: node --test scripts/release-notes.test.mjs
+        run: node --test .github/workflows/scripts/release-notes/release-notes.test.mjs
 
-      - name: Resolve plugin version and changelog section
+      - name: Resolve plugin version
         id: release
         shell: bash
         env:
@@ -97,7 +97,6 @@ jobs:
         run: |
           set -euo pipefail
           RELEASE_VERSION="${RELEASE_VERSION#v}"
-          SECTION=$(node scripts/release-notes.mjs section "$RELEASE_KIND" "$RELEASE_VERSION")
 
           if [ "$RELEASE_KIND" = "nightly" ]; then
             IFS=. read -r MAJOR MINOR PATCH_WITH_SUFFIX <<< "$RELEASE_VERSION"
@@ -108,51 +107,18 @@ jobs:
           fi
 
           echo "core=$CORE" >> "$GITHUB_OUTPUT"
-          echo "section=$SECTION" >> "$GITHUB_OUTPUT"
           echo "Plugin version: $CORE"
-          echo "CHANGELOG section: [$SECTION]"
 
-      - name: Generate release notes and GitHub Release body
-        shell: bash
-        env:
-          CORE: ${{ steps.release.outputs.core }}
-          SECTION: ${{ steps.release.outputs.section }}
-        run: |
-          set -euo pipefail
-          chmod +x ./gradlew
-
-          GRADLE_PROPERTIES=("-PpocBaseVersion=$CORE")
-          CHANGELOG_OPTIONS=()
-          if [ "$SECTION" = "Unreleased" ]; then
-            CHANGELOG_OPTIONS+=("--unreleased")
-          else
-            GRADLE_PROPERTIES+=("-PreleaseNotesVersion=$SECTION")
-            CHANGELOG_OPTIONS+=("--project-version=$SECTION")
-          fi
-
-          ./gradlew "${GRADLE_PROPERTIES[@]}" getChangelog \
-            "${CHANGELOG_OPTIONS[@]}" \
-            --no-header \
-            --no-links \
-            --no-empty-sections \
-            --output-file=build/release-notes.md \
-            --no-daemon \
-            --console=plain
-
-          COMMIT=$(git rev-parse HEAD)
-          node scripts/release-notes.mjs body \
-            --changelog CHANGELOG.md \
-            --notes build/release-notes.md \
-            --section "$SECTION" \
-            --repository "$GITHUB_REPOSITORY" \
-            --commit "$COMMIT" \
-            --server-url "$GITHUB_SERVER_URL" \
-            --output build/release-body.md
-
-          echo "=== Release notes ==="
-          cat build/release-notes.md
-          echo "=== GitHub Release body ==="
-          cat build/release-body.md
+      - name: Prepare release notes
+        id: release_notes
+        uses: ./.github/actions/prepare-release-notes
+        with:
+          releaseKind: ${{ inputs.release_kind }}
+          releaseVersion: ${{ inputs.release_version }}
+          pluginVersion: ${{ steps.release.outputs.core }}
+          repository: ${{ github.repository }}
+          commit: ${{ github.sha }}
+          serverUrl: ${{ github.server_url }}
 
       - name: Download CLS binaries
         shell: pwsh
@@ -162,7 +128,7 @@ jobs:
         shell: bash
         env:
           CORE: ${{ steps.release.outputs.core }}
-          SECTION: ${{ steps.release.outputs.section }}
+          SECTION: ${{ steps.release_notes.outputs.section }}
           BUILD_MODE: ${{ inputs.build_mode }}
         run: |
           set -euo pipefail
@@ -215,14 +181,14 @@ jobs:
             gh release edit "$TAG" \
               --repo "$GITHUB_REPOSITORY" \
               --title "Release notes POC $CORE" \
-              --notes-file build/release-body.md \
+              --notes-file "${{ steps.release_notes.outputs.release_body_path }}" \
               --prerelease
           else
             gh release create "$TAG" \
               --repo "$GITHUB_REPOSITORY" \
               --target "$COMMIT" \
               --title "Release notes POC $CORE" \
-              --notes-file build/release-body.md \
+              --notes-file "${{ steps.release_notes.outputs.release_body_path }}" \
               --prerelease
           fi
 
@@ -243,8 +209,7 @@ jobs:
           path: |
             build/distributions/cls-runner-*.zip
             build/native-distributions/cls-runner-*.zip
-            build/release-notes.md
-            build/release-body.md
+            build/release-notes/
             build/tmp/patchPluginXml/plugin.xml
           if-no-files-found: warn
           retention-days: 7

@@ -103,7 +103,6 @@ changelog {
     headerParserRegex.set("""\d+\.\d+\.\d+""".toRegex())
     keepUnreleasedSection.set(true)
     unreleasedTerm.set("[Unreleased]")
-    groups.set(listOf("New Features", "UX Improvements", "Bug Fixes", "Changed", "Deprecation"))
 }
 
 // --- Bundle the 6 real CLS binaries into the plugin distribution. ---
