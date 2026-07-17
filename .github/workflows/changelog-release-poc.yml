@@ -120,6 +120,14 @@ jobs:
           commit: ${{ github.sha }}
           serverUrl: ${{ github.server_url }}
 
+      - name: Upload Release body transfer artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-notes
+          path: build/release-notes/
+          if-no-files-found: error
+          retention-days: 1
+
       - name: Download CLS binaries
         shell: pwsh
         run: ./scripts/download-binaries.ps1
@@ -213,3 +221,21 @@ jobs:
             build/tmp/patchPluginXml/plugin.xml
           if-no-files-found: warn
           retention-days: 7
+
+  verify-release-notes-transfer:
+    name: Verify release-note artifact transfer
+    needs: build-and-publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Download Release body
+        uses: actions/download-artifact@v8
+        with:
+          name: release-notes
+          path: release-notes
+
+      - name: Verify stable extracted path
+        run: |
+          test -f release-notes/release-body.md
+          test -f release-notes/release-notes.md
