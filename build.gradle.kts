@@ -119,12 +119,21 @@ val copyAgentToSandbox = tasks.register<Sync>("copyAgentToSandbox") {
     doNotTrackState("large native binaries; copy every time to avoid a missing-agent sandbox")
 }
 
+// bundleAgent=false skips copying the ~380 MB CLS binaries into the plugin, producing a tiny
+// plugin for exercising just the release/publish pipeline (the plugin can't launch CLS at runtime,
+// which is fine — these builds only validate release notes + Marketplace publishing).
+val bundleAgent = providers.gradleProperty("bundleAgent").map { it.toBoolean() }.getOrElse(true)
+
 tasks.named<Zip>("buildPlugin") {
-    dependsOn(copyAgentToSandbox)
+    if (bundleAgent) {
+        dependsOn(copyAgentToSandbox)
+    }
 }
 
 tasks.named("runIde") {
-    dependsOn(copyAgentToSandbox)
+    if (bundleAgent) {
+        dependsOn(copyAgentToSandbox)
+    }
 }
 
 // --- Repack the fat ZIP into 6 OS/arch-specific slim ZIPs. ---
