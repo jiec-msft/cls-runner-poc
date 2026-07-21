@@ -4,11 +4,13 @@
 
 - Added a nightly release-note test.
 
-## [1.14.0]
+## [1.14.1]
 
 ### New Features
 
 - Added release notes from `CHANGELOG.md`.
+- Test [link](https://github.com/microsoft/copilot-intellij-feedback).
+- Test link raw https://github.com/microsoft/copilot-intellij-feedback
 
 ### UX Improvements
 
