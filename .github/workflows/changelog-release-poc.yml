@@ -61,6 +61,11 @@ on:
         type: string
         required: false
         default: ''
+  # Mirror jb release.yml, which auto-runs on a published GitHub Release
+  # (jb uses `types: [released]`). The POC marks its test tags as prereleases,
+  # so we also listen to `prereleased` to exercise the same auto-trigger path.
+  release:
+    types: [released, prereleased]
 
 permissions:
   contents: write
@@ -87,12 +92,62 @@ jobs:
       - name: Test release-note helper
         run: node --test .github/workflows/scripts/release-notes/release-notes.test.mjs
 
+      - name: Resolve release context
+        id: ctx
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          IN_KIND: ${{ inputs.release_kind }}
+          IN_VERSION: ${{ inputs.release_version }}
+          IN_CHANNEL: ${{ inputs.marketplace_channel }}
+          IN_VISIBILITY: ${{ inputs.visibility }}
+          IN_BUILD_MODE: ${{ inputs.build_mode }}
+          IN_PLUGIN_ID: ${{ inputs.plugin_id }}
+          IN_DRY_RUN: ${{ inputs.dry_run }}
+          IN_PUBLISH_RELEASE: ${{ inputs.publish_github_release }}
+          IN_RELEASE_TAG: ${{ inputs.github_release_tag }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "release" ]; then
+            # Mirror jb: a published GitHub release is always a stable/RC "release" build.
+            # POC tags look like `changelog-poc-v<version>`; jb uses plain `v<version>`.
+            VERSION="${RELEASE_TAG#changelog-poc-}"
+            VERSION="${VERSION#v}"
+            {
+              echo "release_kind=release"
+              echo "release_version=$VERSION"
+              echo "marketplace_channel=nightly"
+              echo "visibility=hidden"
+              echo "build_mode=split"
+              echo "plugin_id=32412"
+              echo "dry_run=true"
+              echo "publish_github_release=false"
+              echo "update_triggering_release=true"
+              echo "release_tag=$RELEASE_TAG"
+            } >> "$GITHUB_OUTPUT"
+          else
+            {
+              echo "release_kind=$IN_KIND"
+              echo "release_version=$IN_VERSION"
+              echo "marketplace_channel=$IN_CHANNEL"
+              echo "visibility=$IN_VISIBILITY"
+              echo "build_mode=$IN_BUILD_MODE"
+              echo "plugin_id=$IN_PLUGIN_ID"
+              echo "dry_run=$IN_DRY_RUN"
+              echo "publish_github_release=$IN_PUBLISH_RELEASE"
+              echo "update_triggering_release=false"
+              echo "release_tag=$IN_RELEASE_TAG"
+            } >> "$GITHUB_OUTPUT"
+          fi
+          echo "Event: $EVENT_NAME"
+
       - name: Resolve plugin version
         id: release
         shell: bash
         env:
-          RELEASE_KIND: ${{ inputs.release_kind }}
-          RELEASE_VERSION: ${{ inputs.release_version }}
+          RELEASE_KIND: ${{ steps.ctx.outputs.release_kind }}
+          RELEASE_VERSION: ${{ steps.ctx.outputs.release_version }}
           RUN_NUMBER: ${{ github.run_number }}
         run: |
           set -euo pipefail
@@ -113,8 +168,8 @@ jobs:
         id: release_notes
         uses: ./.github/actions/prepare-release-notes
         with:
-          releaseKind: ${{ inputs.release_kind }}
-          releaseVersion: ${{ inputs.release_version }}
+          releaseKind: ${{ steps.ctx.outputs.release_kind }}
+          releaseVersion: ${{ steps.ctx.outputs.release_version }}
           pluginVersion: ${{ steps.release.outputs.core }}
           repository: ${{ github.repository }}
           commit: ${{ github.sha }}
@@ -137,7 +192,7 @@ jobs:
         env:
           CORE: ${{ steps.release.outputs.core }}
           SECTION: ${{ steps.release_notes.outputs.section }}
-          BUILD_MODE: ${{ inputs.build_mode }}
+          BUILD_MODE: ${{ steps.ctx.outputs.build_mode }}
         run: |
           set -euo pipefail
           GRADLE_PROPERTIES=("-PpocBaseVersion=$CORE")
@@ -165,12 +220,12 @@ jobs:
           grep -F '<h3>' "$PLUGIN_XML"
 
       - name: Create or overwrite POC GitHub Release
-        if: ${{ inputs.publish_github_release }}
+        if: ${{ steps.ctx.outputs.publish_github_release == 'true' }}
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           CORE: ${{ steps.release.outputs.core }}
-          INPUT_TAG: ${{ inputs.github_release_tag }}
+          INPUT_TAG: ${{ steps.ctx.outputs.release_tag }}
         run: |
           set -euo pipefail
           COMMIT=$(git rev-parse HEAD)
@@ -200,14 +255,33 @@ jobs:
               --prerelease
           fi
 
+      # Mirror jb's `update-release-notes` job: when the run was triggered by a
+      # published release, overwrite THAT release's body with the generated notes.
+      - name: Overwrite triggering release body
+        if: ${{ steps.ctx.outputs.update_triggering_release == 'true' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.ctx.outputs.release_tag }}
+          BODY_PATH: ${{ steps.release_notes.outputs.release_body_path }}
+        run: |
+          set -euo pipefail
+          if [[ "$RELEASE_TAG" != changelog-poc-* ]]; then
+            echo "Release $RELEASE_TAG is not a changelog-poc-* tag; skipping body overwrite."
+            exit 0
+          fi
+          gh release edit "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --notes-file "$BODY_PATH"
+
       - name: Publish hidden plugin to JetBrains Marketplace
-        if: ${{ !inputs.dry_run }}
+        if: ${{ steps.ctx.outputs.dry_run != 'true' }}
         uses: ./.github/actions/publish-to-marketplace
         with:
           marketplaceToken: ${{ secrets.JETBRAINS_MARKETPLACE_TOKEN }}
-          channel: ${{ inputs.marketplace_channel }}
-          hidden: ${{ inputs.visibility == 'hidden' && 'true' || 'false' }}
-          pluginId: ${{ inputs.plugin_id }}
+          channel: ${{ steps.ctx.outputs.marketplace_channel }}
+          hidden: ${{ steps.ctx.outputs.visibility == 'hidden' && 'true' || 'false' }}
+          pluginId: ${{ steps.ctx.outputs.plugin_id }}
 
       - name: Upload POC artifacts
         if: always()
