@@ -59,6 +59,31 @@ pwsh scripts/verify-zips.ps1                                          # sanity-c
 pwsh scripts/publish-marketplace.ps1 -Token perm:xxxx -Channel nightly
 ```
 
+## Publish the Gradle 2.19 native-variants POC
+
+Use the existing `Publish to Marketplace` workflow with `build_mode=nativeVariants`. This mode is
+restricted to the `nightly` channel. A visible upload requires the explicit confirmation text
+`publish-visible-nightly`.
+
+Publish two increasing versions to test install and update behavior:
+
+```bash
+gh workflow run publish-to-marketplace.yml --repo jiec-msft/cls-runner-poc \
+  --ref build/native-variants-2.19-snapshot \
+  -f release_version=11.0.0 -f build_mode=nativeVariants -f channel=nightly \
+  -f visibility=visible -f dry_run=false \
+  -f confirm_visible=publish-visible-nightly
+
+gh workflow run publish-to-marketplace.yml --repo jiec-msft/cls-runner-poc \
+  --ref build/native-variants-2.19-snapshot \
+  -f release_version=11.0.1 -f build_mode=nativeVariants -f channel=nightly \
+  -f visibility=visible -f dry_run=false \
+  -f confirm_visible=publish-visible-nightly
+```
+
+The workflow retains all seven ZIPs as evidence but removes the regular `buildPlugin` ZIP before
+uploading, so only the six platform-specific variants reach the custom channel.
+
 ## Channels
 
 - **stable** = default channel; reaches everyone via the built-in Marketplace.

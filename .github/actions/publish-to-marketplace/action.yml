@@ -25,6 +25,10 @@ inputs:
     description: 'Total attempts per ZIP'
     required: false
     default: '10'
+  excludeFile:
+    description: 'Optional exact ZIP file name to exclude from publication'
+    required: false
+    default: ''
 
 runs:
   using: composite
@@ -38,6 +42,7 @@ runs:
         XML_ID: ${{ inputs.xmlId }}
         PLUGIN_ID: ${{ inputs.pluginId }}
         MAX_RETRIES: ${{ inputs.maxRetries }}
+        EXCLUDE_FILE: ${{ inputs.excludeFile }}
       run: |
         set -uo pipefail
 
@@ -53,7 +58,7 @@ runs:
         HIDDEN_OPTS=()
         if [ "$HIDDEN" = "true" ]; then HIDDEN_OPTS=(-F "isHidden=true"); echo "Publishing as hidden"; fi
 
-        mapfile -t ZIPS < <(find build -name 'cls-runner-*.zip' -type f | sort)
+        mapfile -t ZIPS < <(find build -name 'cls-runner-*.zip' -type f ! -name "$EXCLUDE_FILE" | sort)
         if [ ${#ZIPS[@]} -eq 0 ]; then echo "❌ No cls-runner-*.zip found under build/"; exit 1; fi
         echo "Found ${#ZIPS[@]} ZIP(s) to publish to channel '$CHANNEL'"
 

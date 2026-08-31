@@ -7,7 +7,8 @@ name: Publish to Marketplace
 #    stable in JetBrains' version comparison (see jb release.yml). Otherwise a -nightly
 #    pre-release of the SAME version would sort below stable and nightly users would never
 #    be offered the update;
-#  - build (fat + 6 slims) is decoupled from upload; upload is curl -> /plugin/uploadPlugin
+#  - build (legacy fat/slims or Gradle native variants) is decoupled from upload;
+#    upload is curl -> /plugin/uploadPlugin
 #    with -F channel + isHidden + retry (.github/actions/publish-to-marketplace).
 #
 # NOTE: the FIRST upload of a brand-new plugin must be done once via the web UI
@@ -39,13 +40,14 @@ on:
         required: true
         default: '1.13.1'
       build_mode:
-        description: 'split = fat 1.13.0-251 + 6 slims (2026.1 routing). universal = single legacy plugin (e.g. 1.12.0, 2025.1.1+ all IDEs, no cap).'
+        description: 'split = manual fat + slims; universal = legacy fat; nativeVariants = Gradle 2.19 six-variant POC.'
         type: choice
         required: true
         default: split
         options:
           - split
           - universal
+          - nativeVariants
       plugin_id:
         description: 'Numeric Marketplace plugin id (preferred; defaults to the cls-runner listing)'
         type: string
@@ -56,13 +58,18 @@ on:
         type: boolean
         required: false
         default: false
+      confirm_visible:
+        description: 'For a visible nativeVariants upload, type publish-visible-nightly'
+        type: string
+        required: false
+        default: ''
 
 permissions:
   contents: read
 
 jobs:
   build-and-publish:
-    name: Build fat + slims and publish (${{ inputs.channel }})
+    name: Build plugin distributions and publish (${{ inputs.channel }})
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -78,6 +85,29 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+
+      - name: Validate native variants publication guard
+        shell: bash
+        env:
+          BUILD_MODE: ${{ inputs.build_mode }}
+          CHANNEL: ${{ inputs.channel }}
+          VISIBILITY: ${{ inputs.visibility }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          CONFIRM_VISIBLE: ${{ inputs.confirm_visible }}
+        run: |
+          set -euo pipefail
+          if [ "$BUILD_MODE" != "nativeVariants" ]; then
+            exit 0
+          fi
+          if [ "$CHANNEL" != "nightly" ]; then
+            echo "::error::nativeVariants POC publication is restricted to the nightly channel"
+            exit 1
+          fi
+          if [ "$DRY_RUN" = "false" ] && [ "$VISIBILITY" = "visible" ] &&
+             [ "$CONFIRM_VISIBLE" != "publish-visible-nightly" ]; then
+            echo "::error::Visible nativeVariants publication requires confirm_visible=publish-visible-nightly"
+            exit 1
+          fi
 
       - name: Compute version
         id: ver
@@ -102,6 +132,8 @@ jobs:
           echo "core=$CORE" >> "$GITHUB_OUTPUT"
           if [ "$BUILD_MODE" = "universal" ]; then
             echo "Core version: $CORE  ->  universal ${CORE} (2025.1.1+, no cap)"
+          elif [ "$BUILD_MODE" = "nativeVariants" ]; then
+            echo "Core version: $CORE  ->  Gradle variants ${CORE}-261-{os}-{arch}"
           else
             echo "Core version: $CORE  ->  fat ${CORE}-251 / slims ${CORE}-261-{os}-{arch}"
           fi
@@ -117,11 +149,56 @@ jobs:
           BUILD_MODE: ${{ inputs.build_mode }}
         run: |
           chmod +x ./gradlew
-          if [ "$BUILD_MODE" = "universal" ]; then
-            ./gradlew buildPlugin -PuniversalBuild=true -PpocBaseVersion="$CORE" --no-daemon --console=plain
-          else
-            ./gradlew buildNativePlugins -PpocBaseVersion="$CORE" --no-daemon --console=plain
-          fi
+          case "$BUILD_MODE" in
+            universal)
+              ./gradlew buildPlugin -PuniversalBuild=true -PpocBaseVersion="$CORE" --no-daemon --console=plain
+              ;;
+            nativeVariants)
+              ./gradlew clean cleanSandbox buildPlugin buildPluginVariants prepareSandbox_runIde \
+                -PnativeVariants=true -PpocBaseVersion="$CORE" --no-daemon --console=plain
+              ;;
+            split)
+              ./gradlew buildNativePlugins -PpocBaseVersion="$CORE" --no-daemon --console=plain
+              ;;
+          esac
+
+      - name: Verify native variant distributions
+        if: ${{ inputs.build_mode == 'nativeVariants' }}
+        shell: pwsh
+        run: ./scripts/verify-zips.ps1 -RequireNativeVariants
+
+      - name: Verify Linux x86_64 runIde sandbox
+        if: ${{ inputs.build_mode == 'nativeVariants' }}
+        shell: bash
+        env:
+          CORE: ${{ steps.ver.outputs.core }}
+        run: |
+          set -euo pipefail
+          PLUGIN_ROOT=$(find .intellijPlatform/sandbox -type d \
+            -path '*/plugins_runIde/cls-runner' -print -quit)
+          test -n "$PLUGIN_ROOT"
+
+          mapfile -t NATIVE_DIRS < <(find "$PLUGIN_ROOT/copilot-agent/native" \
+            -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort)
+          test "${#NATIVE_DIRS[@]}" -eq 1
+          test "${NATIVE_DIRS[0]}" = "linux-x64"
+
+          JAR=$(find "$PLUGIN_ROOT/lib" -maxdepth 1 -name 'cls-runner-*.jar' -print -quit)
+          unzip -p "$JAR" META-INF/plugin.xml > "$RUNNER_TEMP/plugin.xml"
+          grep -F "<version>${CORE}-261-linux-x86_64</version>" "$RUNNER_TEMP/plugin.xml"
+          grep -F '<depends>com.intellij.modules.os.linux</depends>' "$RUNNER_TEMP/plugin.xml"
+          grep -F '<depends>com.intellij.modules.arch.x86_64</depends>' "$RUNNER_TEMP/plugin.xml"
+
+      - name: Verify publishPlugin selects variants
+        if: ${{ inputs.build_mode == 'nativeVariants' }}
+        shell: bash
+        env:
+          CORE: ${{ steps.ver.outputs.core }}
+        run: |
+          set -euo pipefail
+          ./gradlew publishPlugin -PnativeVariants=true -PpocBaseVersion="$CORE" \
+            --dry-run --no-daemon --console=plain | tee "$RUNNER_TEMP/publish-plugin-dry-run.txt"
+          grep -F ':buildPluginVariants' "$RUNNER_TEMP/publish-plugin-dry-run.txt"
 
       - name: List built ZIPs
         shell: bash
@@ -135,6 +212,32 @@ jobs:
           channel: ${{ inputs.channel }}
           hidden: ${{ inputs.visibility == 'hidden' && 'true' || 'false' }}
           pluginId: ${{ inputs.plugin_id }}
+          excludeFile: ${{ inputs.build_mode == 'nativeVariants' && format('cls-runner-{0}-261.zip', steps.ver.outputs.core) || '' }}
+
+      - name: Verify Marketplace accepted all native variants
+        if: ${{ !inputs.dry_run && inputs.build_mode == 'nativeVariants' }}
+        shell: bash
+        env:
+          CORE: ${{ steps.ver.outputs.core }}
+          PLUGIN_ID: ${{ inputs.plugin_id }}
+        run: |
+          set -euo pipefail
+          SUFFIXES=(linux-arm64 linux-x86_64 mac-arm64 mac-x86_64 windows-arm64 windows-x86_64)
+          for attempt in $(seq 1 20); do
+            JSON=$(curl --fail --silent --show-error \
+              "https://plugins.jetbrains.com/api/plugins/${PLUGIN_ID}/updates?channel=nightly")
+            MISSING=0
+            for suffix in "${SUFFIXES[@]}"; do
+              jq -e --arg version "${CORE}-261-${suffix}" \
+                'any(.[]; .version == $version and .channel == "nightly" and .since == "261.0")' \
+                <<<"$JSON" >/dev/null || MISSING=1
+            done
+            [ "$MISSING" -eq 0 ] && exit 0
+            echo "Marketplace metadata is not complete yet (attempt $attempt/20)"
+            sleep 30
+          done
+          echo "::error::Marketplace did not expose all six native variants"
+          exit 1
 
       - name: Upload ZIPs as build artifacts
         if: always()

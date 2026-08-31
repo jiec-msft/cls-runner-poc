@@ -3,6 +3,9 @@
 A deliberately minimal IntelliJ Platform plugin used to validate **fat / slim split-plugin
 distribution**, **JetBrains Marketplace OS/arch routing**, and **auto-update / migration**.
 
+The focused IntelliJ Platform Gradle Plugin `2.19.0-SNAPSHOT` evaluation is documented in
+[NATIVE-VARIANTS-POC.md](NATIVE-VARIANTS-POC.md).
+
 The plugin adds two Tools-menu actions: **Launch CLS (--stdio)** finds the bundled
 `copilot-language-server` binary for the current OS/arch under the plugin's own install path and
 starts it with `--stdio`; **Stop CLS** stops it again. It only proves the absolute-path launch
@@ -57,6 +60,13 @@ pwsh scripts/download-binaries.ps1
 #     -> build/distributions/cls-runner-1.13.1-251.zip
 #     -> build/native-distributions/cls-runner-1.13.1-261-{os}-{arch}.zip
 ./gradlew buildNativePlugins -PpocBaseVersion=1.13.1
+
+# 2c. Gradle Plugin 2.19 native variants — unchanged regular ZIP + 6 built-in variants
+#     -> build/distributions/cls-runner-11.0.0-261.zip
+#     -> build/distributions/cls-runner-11.0.0-261-{os}-{arch}.zip
+./gradlew clean cleanSandbox buildPlugin buildPluginVariants prepareSandbox_runIde `
+  -PnativeVariants=true -PpocBaseVersion=11.0.0
+pwsh scripts/verify-zips.ps1 -RequireNativeVariants
 ```
 
 > **Marketplace-verifier clean (1.12.1 / 1.13.1):** the binary path is resolved from this plugin's
@@ -113,7 +123,7 @@ node --test .github/workflows/scripts/release-notes/release-notes.test.mjs
 ## Layout
 
 ```
-build.gradle.kts                          # IPGP 2.16.0; bundles native/**; buildNativePlugins task
+build.gradle.kts                          # IPGP 2.19 snapshot; nativeVariants + legacy comparison
 buildSrc/.../NativePluginPatcher.kt        # fat ZIP -> 6 slim ZIPs (adapted from PR #12887)
 src/main/kotlin/.../LaunchClsAction.kt      # the launch button (runs off the EDT)
 src/main/resources/META-INF/plugin.xml
