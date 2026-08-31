@@ -19,8 +19,11 @@ val releaseNotesVersion = providers.gradleProperty("releaseNotesVersion").orNull
 val fatSinceBuild = providers.gradleProperty("sinceBuild").get()           // 251
 val fatUntilBuild = providers.gradleProperty("untilBuild").get()           // 260.*
 val nativeSinceBuild = providers.gradleProperty("nativeSinceBuild").get()  // 261
+val nativeVersionSuffix = providers.gradleProperty("nativeVersionSuffix").get() // 261
 val universalSinceBuild = providers.gradleProperty("universalSinceBuild").get() // 251.25410 (2025.1.1)
 val nativeVariantsEnabled = providers.gradleProperty("nativeVariants").map(String::toBoolean).getOrElse(false)
+val nativeFallbackEnabled = providers.gradleProperty("nativeFallback").map(String::toBoolean).getOrElse(false)
+val nativeFallbackUntilBuild = providers.gradleProperty("nativeFallbackUntilBuild").orNull
 val bundleAgent = providers.gradleProperty("bundleAgent").map(String::toBoolean).getOrElse(true)
 
 // universalBuild=true builds a single legacy-style plugin (e.g. 1.12.1-251) that supports 2025.1.1+
@@ -30,8 +33,8 @@ val universalBuild = providers.gradleProperty("universalBuild").map { it.toBoole
 // Both the universal and the split-fat carry the -251 suffix (cosmetic, = since-build branch); the
 // universal still differs by its since-build (251.25410) and having no until-build (see ideaVersion).
 val fatVersion = "$pocBaseVersion-$fatSinceBuild"                          // e.g. 1.12.1-251 / 1.13.1-251
-val nativeVersion = "$pocBaseVersion-$nativeSinceBuild"                    // e.g. 1.15.0-261
-val pluginVersion = if (nativeVariantsEnabled) nativeVersion else fatVersion
+val nativeVersion = "$pocBaseVersion-$nativeVersionSuffix"                 // e.g. 1.15.0-261
+val pluginVersion = if (nativeVariantsEnabled || nativeFallbackEnabled) nativeVersion else fatVersion
 
 version = pluginVersion
 
@@ -44,7 +47,7 @@ repositories {
 
 dependencies {
     intellijPlatform {
-        if (nativeVariantsEnabled) {
+        if (nativeVariantsEnabled || nativeFallbackEnabled) {
             intellijIdea("2026.1.5")
         } else {
             intellijIdeaCommunity("2025.1.7")
@@ -62,7 +65,10 @@ intellijPlatform {
         name = "CLS Runner"
         version = pluginVersion
         ideaVersion {
-            if (nativeVariantsEnabled) {
+            if (nativeFallbackEnabled) {
+                sinceBuild = "261"
+                untilBuild = provider { nativeFallbackUntilBuild?.takeIf(String::isNotBlank) }
+            } else if (nativeVariantsEnabled) {
                 sinceBuild = nativeSinceBuild
                 untilBuild = provider { null }
             } else if (universalBuild) {

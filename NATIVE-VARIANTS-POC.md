@@ -103,8 +103,36 @@ configuration using build `IU-261.27258.48`:
    `.9` Windows x86_64 version and still contained only `win32-x64`.
 
 The custom repository passed to `installPlugins` is not automatically reused by the headless
-`update` starter; `idea.plugin.hosts` is required. Older 261 patches remain outside the supported
-custom-channel contract communicated by JetBrains.
+`update` starter; `idea.plugin.hosts` is required.
+
+### Nightly fallback for 2026.1-2026.1.4
+
+Custom-channel OS/architecture routing starts with IntelliJ IDEA 2026.1.5. A six-variant-only
+nightly therefore leaves earlier 2026.1 builds without an installable update. The validated bridge
+publishes seven artifacts from the same logical release:
+
+- universal fallback: `{core}-261`, `since-build="261"`, `until-build="261.26222.*"`, all six
+  native payloads
+- native variants: `{core}-261-{os}-{arch}`, `since-build="261.27258"`, no upper bound, one payload
+  each
+
+The ranges are disjoint, so 2026.1.5+ always receives a native variant while 2026.1-2026.1.4
+receives the fallback. After an IDE upgrade from 2026.1.4 to 2026.1.5, the installed fallback is
+temporarily incompatible until the matching native variant update is applied.
+
+The disjoint layout was validated on the visible nightly channel:
+
+- [dry-run build 33357006935](https://github.com/jiec-msft/cls-runner-poc/actions/runs/33357006935)
+- [visible publication 33358394070](https://github.com/jiec-msft/cls-runner-poc/actions/runs/33358394070)
+- IDEA 2026.1.4 installed `{core}-261` with all six payloads
+- IDEA 2026.1.5 installed `{core}-261-windows-x86_64` with only `win32-x64`
+- Marketplace queries selected all six matching OS/architecture variants
+- fallback and native installations both updated to the next matching nightly version
+- an IDEA 2026.1.4 fallback installation, opened with 2026.1.5, updated to the matching native
+  variant
+
+This makes the complete nightly matrix eight artifacts: the existing 251-253 all-in-one archive,
+one 261 fallback, and six 2026.1.5+ native variants.
 
 ## Agent Probe evaluation
 
@@ -134,8 +162,10 @@ installs, and updates native payloads and is a strong replacement candidate for 
 repack step. Adoption should wait for:
 
 1. A normal publication cycle confirming Marketplace selection, installation, and update behavior.
-2. A decision on fixed variant archive/version names.
-3. A dual-baseline design that preserves the 251-253 artifact.
+2. Acceptance of the short incompatible window while an upgraded 2026.1.5 IDE applies the native
+   variant update.
+3. A dual-baseline release design that publishes the 251-253 all-in-one plus the seven 261
+   artifacts.
 
 ## Feedback for JetBrains
 
