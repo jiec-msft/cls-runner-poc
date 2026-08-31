@@ -40,7 +40,7 @@ on:
         required: true
         default: '1.13.1'
       build_mode:
-        description: 'split = manual fat + slims; universal = legacy fat; nativeVariants = Gradle 2.19 six-variant POC.'
+        description: 'split = manual fat + slims; universal = legacy fat; nativeVariants = six variants; nativeVariantsFallback = ranked 261 fallback + 2026.1.5 variants.'
         type: choice
         required: true
         default: split
@@ -48,6 +48,7 @@ on:
           - split
           - universal
           - nativeVariants
+          - nativeVariantsFallback
       plugin_id:
         description: 'Numeric Marketplace plugin id (preferred; defaults to the cls-runner listing)'
         type: string
@@ -96,7 +97,8 @@ jobs:
           CONFIRM_VISIBLE: ${{ inputs.confirm_visible }}
         run: |
           set -euo pipefail
-          if [ "$BUILD_MODE" != "nativeVariants" ]; then
+          if [ "$BUILD_MODE" != "nativeVariants" ] &&
+             [ "$BUILD_MODE" != "nativeVariantsFallback" ]; then
             exit 0
           fi
           if [ "$CHANNEL" != "nightly" ]; then
@@ -134,6 +136,8 @@ jobs:
             echo "Core version: $CORE  ->  universal ${CORE} (2025.1.1+, no cap)"
           elif [ "$BUILD_MODE" = "nativeVariants" ]; then
             echo "Core version: $CORE  ->  Gradle variants ${CORE}-261-{os}-{arch}"
+          elif [ "$BUILD_MODE" = "nativeVariantsFallback" ]; then
+            echo "Core version: $CORE  ->  ${CORE}-261 fallback + ${CORE}-261-{os}-{arch} variants"
           else
             echo "Core version: $CORE  ->  fat ${CORE}-251 / slims ${CORE}-261-{os}-{arch}"
           fi
@@ -157,21 +161,43 @@ jobs:
               ./gradlew clean cleanSandbox buildPlugin buildPluginVariants prepareSandbox_runIde \
                 -PnativeVariants=true -PpocBaseVersion="$CORE" --no-daemon --console=plain
               ;;
+            nativeVariantsFallback)
+              FALLBACK_DIR="$RUNNER_TEMP/native-fallback"
+              mkdir -p "$FALLBACK_DIR"
+              ./gradlew clean buildPlugin \
+                -PnativeFallback=true -PnativeSinceBuild=261 -PpocBaseVersion="$CORE" \
+                --no-daemon --console=plain
+              cp "build/distributions/cls-runner-${CORE}-261.zip" "$FALLBACK_DIR/"
+
+              ./gradlew clean cleanSandbox buildPluginVariants prepareSandbox_runIde \
+                -PnativeVariants=true -PnativeSinceBuild=261.27258 -PpocBaseVersion="$CORE" \
+                --no-daemon --console=plain
+              mkdir -p build/distributions
+              cp "$FALLBACK_DIR/cls-runner-${CORE}-261.zip" build/distributions/
+              ;;
             split)
               ./gradlew buildNativePlugins -PpocBaseVersion="$CORE" --no-daemon --console=plain
               ;;
           esac
 
       - name: Verify native variant distributions
-        if: ${{ inputs.build_mode == 'nativeVariants' }}
+        if: ${{ inputs.build_mode == 'nativeVariants' || inputs.build_mode == 'nativeVariantsFallback' }}
         shell: pwsh
-        run: ./scripts/verify-zips.ps1 -RequireNativeVariants
+        env:
+          BUILD_MODE: ${{ inputs.build_mode }}
+        run: |
+          if ($env:BUILD_MODE -eq "nativeVariantsFallback") {
+            ./scripts/verify-zips.ps1 -RequireNativeVariants -RequireNightlyFallback
+          } else {
+            ./scripts/verify-zips.ps1 -RequireNativeVariants
+          }
 
       - name: Verify Linux x86_64 runIde sandbox
-        if: ${{ inputs.build_mode == 'nativeVariants' }}
+        if: ${{ inputs.build_mode == 'nativeVariants' || inputs.build_mode == 'nativeVariantsFallback' }}
         shell: bash
         env:
           CORE: ${{ steps.ver.outputs.core }}
+          BUILD_MODE: ${{ inputs.build_mode }}
         run: |
           set -euo pipefail
           PLUGIN_ROOT=$(find .intellijPlatform/sandbox -type d \
@@ -190,7 +216,7 @@ jobs:
           grep -F '<depends>com.intellij.modules.arch.x86_64</depends>' "$RUNNER_TEMP/plugin.xml"
 
       - name: Verify publishPlugin selects variants
-        if: ${{ inputs.build_mode == 'nativeVariants' }}
+        if: ${{ inputs.build_mode == 'nativeVariants' || inputs.build_mode == 'nativeVariantsFallback' }}
         shell: bash
         env:
           CORE: ${{ steps.ver.outputs.core }}
@@ -215,23 +241,36 @@ jobs:
           excludeFile: ${{ inputs.build_mode == 'nativeVariants' && format('cls-runner-{0}-261.zip', steps.ver.outputs.core) || '' }}
 
       - name: Verify Marketplace accepted all native variants
-        if: ${{ !inputs.dry_run && inputs.build_mode == 'nativeVariants' }}
+        if: ${{ !inputs.dry_run && (inputs.build_mode == 'nativeVariants' || inputs.build_mode == 'nativeVariantsFallback') }}
         shell: bash
         env:
           CORE: ${{ steps.ver.outputs.core }}
           PLUGIN_ID: ${{ inputs.plugin_id }}
+          BUILD_MODE: ${{ inputs.build_mode }}
         run: |
           set -euo pipefail
           SUFFIXES=(linux-arm64 linux-x86_64 mac-arm64 mac-x86_64 windows-arm64 windows-x86_64)
+          VARIANT_SINCE="261.0"
+          FALLBACK_VERSION="${CORE}-261"
+          if [ "$BUILD_MODE" = "nativeVariantsFallback" ]; then
+            VARIANT_SINCE="261.27258"
+          fi
           for attempt in $(seq 1 20); do
             JSON=$(curl --fail --silent --show-error \
               "https://plugins.jetbrains.com/api/plugins/${PLUGIN_ID}/updates?channel=nightly")
             MISSING=0
             for suffix in "${SUFFIXES[@]}"; do
               jq -e --arg version "${CORE}-261-${suffix}" \
-                'any(.[]; .version == $version and .channel == "nightly" and .since == "261.0")' \
+                --arg since "$VARIANT_SINCE" \
+                'any(.[]; .version == $version and .channel == "nightly" and .since == $since)' \
                 <<<"$JSON" >/dev/null || MISSING=1
             done
+            if [ "$BUILD_MODE" = "nativeVariantsFallback" ]; then
+              jq -e --arg version "$FALLBACK_VERSION" \
+                'any(.[]; .version == $version and .channel == "nightly" and
+                  .since == "261.0" and .until == "261.26222.*")' \
+                <<<"$JSON" >/dev/null || MISSING=1
+            fi
             [ "$MISSING" -eq 0 ] && exit 0
             echo "Marketplace metadata is not complete yet (attempt $attempt/20)"
             sleep 30

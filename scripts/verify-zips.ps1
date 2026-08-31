@@ -1,7 +1,8 @@
 #requires -Version 5.1
 # Verifies the built fat + slim ZIPs: native dirs kept, plugin.xml id/version/idea-version/depends.
 param(
-    [switch]$RequireNativeVariants
+    [switch]$RequireNativeVariants,
+    [switch]$RequireNightlyFallback
 )
 
 $ErrorActionPreference = "Stop"
@@ -96,10 +97,12 @@ if ($RequireNativeVariants) {
         if ($item.Native -ne $expected[0]) {
             throw "$($item.Name) contains native '$($item.Native)', expected '$($expected[0])'."
         }
-        if ($item.Version -notmatch "-$([regex]::Escape($suffix))$") {
-            throw "$($item.Name) has plugin version '$($item.Version)', expected suffix '-$suffix'."
+        if ($item.Version -notmatch "-261-$([regex]::Escape($suffix))$") {
+            throw "$($item.Name) has plugin version '$($item.Version)', expected suffix '-261-$suffix'."
         }
-        if ($item.IdeaVersion -notmatch 'since-build="261"' -or $item.IdeaVersion -match 'until-build=') {
+        $expectedSinceBuild = if ($RequireNightlyFallback) { "261.27258" } else { "261" }
+        if ($item.IdeaVersion -notmatch "since-build=`"$([regex]::Escape($expectedSinceBuild))`"" -or
+            $item.IdeaVersion -match 'until-build=') {
             throw "$($item.Name) has unexpected compatibility: $($item.IdeaVersion)"
         }
         foreach ($dependency in $expected[1..2]) {
@@ -121,6 +124,18 @@ if ($RequireNativeVariants) {
     $expectedAllPlatforms = "darwin-arm64, darwin-x64, linux-arm64, linux-x64, win32-arm64, win32-x64"
     if ($regular[0].Native -ne $expectedAllPlatforms) {
         throw "$($regular[0].Name) contains '$($regular[0].Native)', expected all six native platforms."
+    }
+    if (-not $regular[0].Version.EndsWith("-261")) {
+        throw "$($regular[0].Name) has plugin version '$($regular[0].Version)', expected suffix '-261'."
+    }
+    if ($RequireNightlyFallback) {
+        if ($regular[0].IdeaVersion -notmatch 'since-build="261"' -or
+            $regular[0].IdeaVersion -notmatch 'until-build="261\.26222\.\*"') {
+            throw "$($regular[0].Name) has unexpected fallback compatibility: $($regular[0].IdeaVersion)"
+        }
+    } elseif ($regular[0].IdeaVersion -notmatch 'since-build="261"' -or
+        $regular[0].IdeaVersion -match 'until-build=') {
+        throw "$($regular[0].Name) has unexpected compatibility: $($regular[0].IdeaVersion)"
     }
     if ($regular[0].Dependencies.Count -ne 0) {
         throw "$($regular[0].Name) unexpectedly declares native OS/architecture dependencies."
