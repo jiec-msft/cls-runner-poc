@@ -3,6 +3,7 @@
 ### New Features
 
 - Added a nightly release-note test.
+- Added an IntelliJ Platform Gradle Plugin 2.19 native-variants proof of concept.
 
 ## [1.14.1]
 

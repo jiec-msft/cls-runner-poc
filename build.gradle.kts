@@ -7,8 +7,8 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.dsl.KotlinVersion
 
 plugins {
-    kotlin("jvm") version "2.1.20"
-    id("org.jetbrains.intellij.platform") version "2.16.0"
+    kotlin("jvm") version "2.3.10"
+    id("org.jetbrains.intellij.platform") version "2.19.0-SNAPSHOT"
     id("org.jetbrains.changelog") version "2.5.0"
 }
 
@@ -20,6 +20,8 @@ val fatSinceBuild = providers.gradleProperty("sinceBuild").get()           // 25
 val fatUntilBuild = providers.gradleProperty("untilBuild").get()           // 260.*
 val nativeSinceBuild = providers.gradleProperty("nativeSinceBuild").get()  // 261
 val universalSinceBuild = providers.gradleProperty("universalSinceBuild").get() // 251.25410 (2025.1.1)
+val nativeVariantsEnabled = providers.gradleProperty("nativeVariants").map(String::toBoolean).getOrElse(false)
+val bundleAgent = providers.gradleProperty("bundleAgent").map(String::toBoolean).getOrElse(true)
 
 // universalBuild=true builds a single legacy-style plugin (e.g. 1.12.1-251) that supports 2025.1.1+
 // ALL IDEs (since universalSinceBuild, NO until-build) — the "old plugin" a user has before the split.
@@ -27,8 +29,9 @@ val universalSinceBuild = providers.gradleProperty("universalSinceBuild").get() 
 val universalBuild = providers.gradleProperty("universalBuild").map { it.toBoolean() }.getOrElse(false)
 // Both the universal and the split-fat carry the -251 suffix (cosmetic, = since-build branch); the
 // universal still differs by its since-build (251.25410) and having no until-build (see ideaVersion).
-val pluginVersion = "$pocBaseVersion-$fatSinceBuild"                        // e.g. 1.12.1-251 / 1.13.1-251
-val fatVersion = pluginVersion
+val fatVersion = "$pocBaseVersion-$fatSinceBuild"                          // e.g. 1.12.1-251 / 1.13.1-251
+val nativeVersion = "$pocBaseVersion-$nativeSinceBuild"                    // e.g. 1.15.0-261
+val pluginVersion = if (nativeVariantsEnabled) nativeVersion else fatVersion
 
 version = pluginVersion
 
@@ -41,7 +44,11 @@ repositories {
 
 dependencies {
     intellijPlatform {
-        intellijIdeaCommunity("2025.1.7")
+        if (nativeVariantsEnabled) {
+            intellijIdea("2026.1.5")
+        } else {
+            intellijIdeaCommunity("2025.1.7")
+        }
     }
 }
 
@@ -55,7 +62,10 @@ intellijPlatform {
         name = "CLS Runner"
         version = pluginVersion
         ideaVersion {
-            if (universalBuild) {
+            if (nativeVariantsEnabled) {
+                sinceBuild = nativeSinceBuild
+                untilBuild = provider { null }
+            } else if (universalBuild) {
                 // Legacy universal build: 2025.1.1+ with NO upper bound, installable on every IDE
                 // (incl. 261+), so it is the migration source the split 1.13.0 updates from.
                 sinceBuild = universalSinceBuild
@@ -66,6 +76,28 @@ intellijPlatform {
             }
         }
     }
+    nativeVariants {
+        enabled = nativeVariantsEnabled
+
+        linux.x86_64.from(fileTree(projectDir) {
+            include("copilot-agent/native/linux-x64/**")
+        })
+        linux.arm64.from(fileTree(projectDir) {
+            include("copilot-agent/native/linux-arm64/**")
+        })
+        mac.x86_64.from(fileTree(projectDir) {
+            include("copilot-agent/native/darwin-x64/**")
+        })
+        mac.arm64.from(fileTree(projectDir) {
+            include("copilot-agent/native/darwin-arm64/**")
+        })
+        windows.x86_64.from(fileTree(projectDir) {
+            include("copilot-agent/native/win32-x64/**")
+        })
+        windows.arm64.from(fileTree(projectDir) {
+            include("copilot-agent/native/win32-arm64/**")
+        })
+    }
     publishing {
         token = providers.environmentVariable("JETBRAINS_MARKETPLACE_TOKEN")
     }
@@ -74,8 +106,8 @@ intellijPlatform {
 kotlin {
     compilerOptions {
         jvmTarget.set(JvmTarget.JVM_21)
-        apiVersion.set(KotlinVersion.KOTLIN_2_1)
-        languageVersion.set(KotlinVersion.KOTLIN_2_1)
+        apiVersion.set(KotlinVersion.KOTLIN_2_3)
+        languageVersion.set(KotlinVersion.KOTLIN_2_3)
     }
 }
 
@@ -105,34 +137,28 @@ changelog {
     unreleasedTerm.set("[Unreleased]")
 }
 
-// --- Bundle the 6 real CLS binaries into the plugin distribution. ---
-// Anchored to IPGP's own pluginDirectory so we follow whatever sandbox layout IPGP uses.
-// Sync targets the copilot-agent SUBDIR only, so it never deletes lib/.
-val prepareSandboxProvider = tasks.named<PrepareSandboxTask>("prepareSandbox")
-
-val copyAgentToSandbox = tasks.register<Sync>("copyAgentToSandbox") {
-    into(prepareSandboxProvider.flatMap { it.pluginDirectory.map { dir -> dir.dir("copilot-agent") } })
+val prepareRunIdeSandboxProvider = tasks.named<PrepareSandboxTask>("prepareSandbox_runIde")
+val copyAgentToRunIdeSandbox = tasks.register<Sync>("copyAgentToRunIdeSandbox") {
+    into(prepareRunIdeSandboxProvider.flatMap { it.pluginDirectory.map { dir -> dir.dir("copilot-agent") } })
     from(layout.projectDirectory.dir("copilot-agent")) {
         include("native/**")
     }
-    dependsOn(prepareSandboxProvider)
+    dependsOn(prepareRunIdeSandboxProvider)
     doNotTrackState("large native binaries; copy every time to avoid a missing-agent sandbox")
 }
 
-// bundleAgent=false skips copying the ~380 MB CLS binaries into the plugin, producing a tiny
-// plugin for exercising just the release/publish pipeline (the plugin can't launch CLS at runtime,
-// which is fine — these builds only validate release notes + Marketplace publishing).
-val bundleAgent = providers.gradleProperty("bundleAgent").map { it.toBoolean() }.getOrElse(true)
-
 tasks.named<Zip>("buildPlugin") {
     if (bundleAgent) {
-        dependsOn(copyAgentToSandbox)
+        from(layout.projectDirectory.dir("copilot-agent")) {
+            include("native/**")
+            into("copilot-agent")
+        }
     }
 }
 
 tasks.named("runIde") {
-    if (bundleAgent) {
-        dependsOn(copyAgentToSandbox)
+    if (bundleAgent && !nativeVariantsEnabled) {
+        dependsOn(copyAgentToRunIdeSandbox)
     }
 }
 
